@@ -16,6 +16,7 @@ TeleForward forwards messages from one or more Telegram channels/groups to one o
 ## Contents
 
 - [Features](#features)
+- [Installation](#installation)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
@@ -38,6 +39,36 @@ TeleForward forwards messages from one or more Telegram channels/groups to one o
   - deterministic per-channel accent color
   - optional title hyperlink to the original `t.me/...` message when the Telegram channel has a public `@username`
 - Skips media-only posts (media with no caption/text)
+
+## Installation
+
+### Local (Windows / Linux / macOS)
+
+- Prereqs: Python 3.10+
+- Setup (recommended):
+  - Windows PowerShell: `.\scripts\local_setup.ps1`
+  - Linux/macOS: `bash scripts/local_setup.sh`
+
+### VPS (Ubuntu, systemd)
+
+Use the end-to-end installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/satriapamudji/teleforward/main/scripts/vps_install_ubuntu.sh | sudo bash -s -- \
+  --repo https://github.com/satriapamudji/teleforward.git
+```
+
+Then follow the printed “Next steps” (set secrets, run TUI once to login/export session, start service).
+
+### For LLM agents
+
+If you’re using an LLM coding agent to deploy TeleForward, point it at:
+
+- `scripts/vps_install_ubuntu.sh` and `scripts/vps_update_ubuntu.sh`
+- `docs/INSTALL_UBUNTU_VPS.md` (step-by-step)
+- The hard rules:
+  - Never print/store Telegram session strings or Discord webhook URLs in logs or chat transcripts.
+  - Headless mode cannot prompt for Telegram login codes; use the TUI once to create/export a session.
 
 ## Quick start
 
