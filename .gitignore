@@ -5,3 +5,6 @@ __pycache__/
 .ruff_cache/
 *.log
 .venv
+*.egg-info/
+teleforward.egg-info/
+var/

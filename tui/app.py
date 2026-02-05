@@ -206,6 +206,57 @@ async def _login_status(ctx: TuiContext) -> None:
         console.print(Panel(f"{e}", title="Telegram status error", border_style="red"))
 
 
+async def _export_telegram_session(ctx: TuiContext) -> None:
+    ok = await _ensure_telegram_connected(ctx, interactive=True)
+    if not ok:
+        console.print(Panel("Telegram login required.", border_style="yellow"))
+        return
+
+    session = ctx.telegram.get_session_string()
+    if not session:
+        console.print(
+            Panel(
+                "Could not read a Telegram session string from the client.",
+                title="Telegram session",
+                border_style="red",
+            )
+        )
+        return
+
+    preview = session[:24] + "..." + session[-12:]
+    console.print(
+        Panel(
+            "This session string is equivalent to your Telegram login.\n"
+            "Treat it like a password and store it as a secret.\n\n"
+            f"[dim]Preview[/dim]=[white]{preview}[/white]\n"
+            f"[dim]Length[/dim]=[white]{len(session)}[/white]",
+            title="Export Telegram session string",
+            border_style="yellow",
+        )
+    )
+
+    try:
+        reveal = _prompt("Reveal full session string? (y/n, default n)", default="n").lower()
+    except CancelAction:
+        return
+    if reveal not in {"y", "yes"}:
+        console.print(Panel("Not revealed.", border_style="cyan"))
+        return
+
+    console.print(
+        Panel(
+            f"TELEGRAM_SESSION_STRING={session}",
+            title="Copy into /etc/teleforward/teleforward.env",
+            border_style="green",
+        )
+    )
+    try:
+        input("\nPress Enter to clear this from the screen...")
+    except KeyboardInterrupt:
+        raise
+    console.clear()
+
+
 async def _import_channels(ctx: TuiContext) -> None:
     ok = await _ensure_telegram_connected(ctx, interactive=True)
     if not ok:
@@ -1401,6 +1452,7 @@ async def run_tui(config: Config, db: Database) -> None:
             telegram_menu.add_row("3", "Import channels (search)")
             telegram_menu.add_row("4", "Add channel manually")
             telegram_menu.add_row("5", "Manage channels (rename/toggle/delete)")
+            telegram_menu.add_row("16", "Export session string (copy to env)")
 
             discord_menu = Table(show_header=False, box=None, pad_edge=False)
             discord_menu.add_column("Key", style="cyan", no_wrap=True)
@@ -1448,7 +1500,7 @@ async def run_tui(config: Config, db: Database) -> None:
             )
 
             try:
-                choice = Prompt.ask("Select (0-15, q=exit)", default="").strip()
+                choice = Prompt.ask("Select (0-16, q=exit)", default="").strip()
             except KeyboardInterrupt:
                 raise
             if choice.lower() in {"q", "quit"}:
@@ -1468,6 +1520,8 @@ async def run_tui(config: Config, db: Database) -> None:
                     _add_channel_manual(ctx)
                 elif choice == "5":
                     _manage_channels(ctx)
+                elif choice == "16":
+                    await _export_telegram_session(ctx)
                 elif choice == "6":
                     _print_webhooks(ctx)
                 elif choice == "7":
