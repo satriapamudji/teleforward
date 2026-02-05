@@ -62,13 +62,41 @@ Then follow the printed “Next steps” (set secrets, run TUI once to login/exp
 
 ### For LLM agents
 
+Fetch the installation guide and follow it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/satriapamudji/teleforward/main/docs/INSTALL_UBUNTU_VPS.md
+```
+
+Fetch the LLM agent guide and follow it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/satriapamudji/teleforward/main/docs/LLM_AGENT_GUIDE.md
+```
+
 If you’re using an LLM coding agent to deploy TeleForward, point it at:
 
 - `scripts/vps_install_ubuntu.sh` and `scripts/vps_update_ubuntu.sh`
 - `docs/INSTALL_UBUNTU_VPS.md` (step-by-step)
 - The hard rules:
-  - Never print/store Telegram session strings or Discord webhook URLs in logs or chat transcripts.
+  - Never print/store Telegram session strings or Discord webhook URLs (they contain secrets).
   - Headless mode cannot prompt for Telegram login codes; use the TUI once to create/export a session.
+
+<details>
+<summary><strong>LLM agent checklist (click to expand)</strong></summary>
+
+1. Install/update with `scripts/vps_install_ubuntu.sh` or `scripts/vps_update_ubuntu.sh`.
+2. Confirm `/etc/teleforward/teleforward.env` has:
+   - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`
+   - `DATA_DIR=/var/lib/teleforward`, `DATABASE_PATH=/var/lib/teleforward/teleforward.db`
+3. Run the TUI once to create/export a Telegram session and store it as a secret:
+   - `set -a; source /etc/teleforward/teleforward.env; set +a`
+   - `teleforward tui` -> Login -> Export session string -> paste into env
+4. Start and verify:
+   - `sudo systemctl restart teleforward`
+   - `sudo journalctl -u teleforward -f`
+
+</details>
 
 ## Quick start
 
