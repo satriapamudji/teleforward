@@ -125,6 +125,11 @@ async def _ensure_telegram_connected(ctx: TuiContext, interactive: bool) -> bool
             code_callback=None,
             password_callback=None,
         )
+        # If the session was created as a file session, proactively export it and
+        # store it in the DB so headless runs can use it.
+        session = ctx.telegram.export_session_string()
+        if session:
+            ctx.db.set_setting("telegram_session_string", session)
         return True
     except ValueError:
         if not interactive:
@@ -1449,36 +1454,36 @@ async def run_tui(config: Config, db: Database) -> None:
             telegram_menu.add_column("Action", style="bold")
             telegram_menu.add_row("1", "Telegram status")
             telegram_menu.add_row("2", "Login / refresh session")
-            telegram_menu.add_row("3", "Import channels (search)")
-            telegram_menu.add_row("4", "Add channel manually")
-            telegram_menu.add_row("5", "Manage channels (rename/toggle/delete)")
-            telegram_menu.add_row("16", "Export session string (copy to env)")
+            telegram_menu.add_row("3", "Export session string (copy to env)")
+            telegram_menu.add_row("4", "Import channels (search)")
+            telegram_menu.add_row("5", "Add channel manually")
+            telegram_menu.add_row("6", "Manage channels (rename/toggle/delete)")
 
             discord_menu = Table(show_header=False, box=None, pad_edge=False)
             discord_menu.add_column("Key", style="cyan", no_wrap=True)
             discord_menu.add_column("Action", style="bold")
-            discord_menu.add_row("6", "List webhooks")
-            discord_menu.add_row("7", "Add webhook")
-            discord_menu.add_row("8", "Manage webhooks (rename/toggle/delete)")
+            discord_menu.add_row("7", "List webhooks")
+            discord_menu.add_row("8", "Add webhook")
+            discord_menu.add_row("9", "Manage webhooks (rename/toggle/delete)")
 
             mapping_menu = Table(show_header=False, box=None, pad_edge=False)
             mapping_menu.add_column("Key", style="cyan", no_wrap=True)
             mapping_menu.add_column("Action", style="bold")
-            mapping_menu.add_row("9", "Create mappings (multi-select)")
-            mapping_menu.add_row("10", "Manage mappings (edit/toggle/delete)")
+            mapping_menu.add_row("10", "Create mappings (multi-select)")
+            mapping_menu.add_row("11", "Manage mappings (edit/toggle/delete)")
 
             run_menu = Table(show_header=False, box=None, pad_edge=False)
             run_menu.add_column("Key", style="cyan", no_wrap=True)
             run_menu.add_column("Action", style="bold")
-            run_menu.add_row("11", "Run forwarder")
-            run_menu.add_row("12", "Show recent logs")
+            run_menu.add_row("12", "Run forwarder")
+            run_menu.add_row("13", "Show recent logs")
 
             tools_menu = Table(show_header=False, box=None, pad_edge=False)
             tools_menu.add_column("Key", style="cyan", no_wrap=True)
             tools_menu.add_column("Action", style="bold")
-            tools_menu.add_row("13", "Setup wizard")
-            tools_menu.add_row("14", "Send test message to webhook")
-            tools_menu.add_row("15", "Test forward last Telegram message")
+            tools_menu.add_row("14", "Setup wizard")
+            tools_menu.add_row("15", "Send test message to webhook")
+            tools_menu.add_row("16", "Test forward last Telegram message")
             tools_menu.add_row("0", "Exit")
 
             console.print(
@@ -1515,32 +1520,32 @@ async def run_tui(config: Config, db: Database) -> None:
                 elif choice == "2":
                     await _ensure_telegram_connected(ctx, interactive=True)
                 elif choice == "3":
-                    await _import_channels(ctx)
-                elif choice == "4":
-                    _add_channel_manual(ctx)
-                elif choice == "5":
-                    _manage_channels(ctx)
-                elif choice == "16":
                     await _export_telegram_session(ctx)
+                elif choice == "4":
+                    await _import_channels(ctx)
+                elif choice == "5":
+                    _add_channel_manual(ctx)
                 elif choice == "6":
-                    _print_webhooks(ctx)
+                    _manage_channels(ctx)
                 elif choice == "7":
-                    await _add_webhook(ctx)
+                    _print_webhooks(ctx)
                 elif choice == "8":
-                    await _manage_webhooks(ctx)
+                    await _add_webhook(ctx)
                 elif choice == "9":
-                    _create_mappings(ctx)
+                    await _manage_webhooks(ctx)
                 elif choice == "10":
-                    _manage_mappings(ctx)
+                    _create_mappings(ctx)
                 elif choice == "11":
-                    await _run_forwarder(ctx)
+                    _manage_mappings(ctx)
                 elif choice == "12":
-                    _print_logs(ctx)
+                    await _run_forwarder(ctx)
                 elif choice == "13":
-                    await setup_wizard()
+                    _print_logs(ctx)
                 elif choice == "14":
-                    await _send_test_message(ctx)
+                    await setup_wizard()
                 elif choice == "15":
+                    await _send_test_message(ctx)
+                elif choice == "16":
                     await _test_forward_last_message(ctx)
                 else:
                     console.print(Panel("Unknown option.", border_style="yellow"))
