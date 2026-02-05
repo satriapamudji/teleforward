@@ -13,17 +13,30 @@ Secure Telegram -> Discord forwarder with a Rich terminal UI.
 
 TeleForward forwards messages from one or more Telegram channels/groups to one or more Discord channels using Discord webhooks. It is designed for VPS use (systemd included) and fast interactive operation via a Rich-based TUI.
 
-## Contents
+<details>
+<summary><strong>Contents</strong></summary>
 
 - [Features](#features)
 - [Installation](#installation)
+  - Local setup (Windows / Linux / macOS)
+  - VPS setup (Ubuntu, systemd)
+  - For LLM agents (safe defaults + checklists)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
+  - Required env vars
+  - Headless/VPS session requirement
+  - Discord formatting options
 - [Burst handling](#burst-handling)
 - [Security notes](#security-notes)
 - [Ubuntu VPS (systemd)](#ubuntu-vps-systemd)
+  - First-time Telegram login
+  - Troubleshooting (read-only FS, DB path, CRLF)
 - [Deployment scripts](#deployment-scripts)
+  - Ubuntu VPS install/update
+  - Local setup scripts
+
+</details>
 
 ## Features
 
