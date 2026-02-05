@@ -12,6 +12,8 @@ EnvironmentFile=/etc/teleforward/teleforward.env
 ExecStart=/opt/teleforward/.venv/bin/python /opt/teleforward/main.py run
 Restart=on-failure
 RestartSec=3
+UMask=0077
+Environment=PYTHONUNBUFFERED=1
 
 # Create /var/lib/teleforward with correct ownership
 StateDirectory=teleforward

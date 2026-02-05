@@ -130,6 +130,7 @@ This repo includes a systemd unit: `deploy/systemd/teleforward.service`.
 1. Copy the project to `/opt/teleforward` and create a venv:
    - `python3 -m venv /opt/teleforward/.venv`
    - `/opt/teleforward/.venv/bin/pip install -r /opt/teleforward/requirements.txt`
+   - (optional, to enable the `teleforward` command) `/opt/teleforward/.venv/bin/pip install -e /opt/teleforward`
 2. Create a dedicated user and config directory:
    - `sudo useradd --system --home /opt/teleforward --shell /usr/sbin/nologin teleforward`
    - `sudo mkdir -p /etc/teleforward`
@@ -143,3 +144,12 @@ This repo includes a systemd unit: `deploy/systemd/teleforward.service`.
 5. Validate + view logs:
    - `/opt/teleforward/.venv/bin/python /opt/teleforward/main.py doctor --test-webhooks`
    - `sudo journalctl -u teleforward -f`
+
+### VPS tips / troubleshooting
+
+- If you run commands manually (not via systemd), `/etc/teleforward/teleforward.env` is not loaded automatically. Either:
+  - activate the venv: `source /opt/teleforward/.venv/bin/activate`
+  - or load the env file: `set -a; source /etc/teleforward/teleforward.env; set +a`
+- If systemd shows `OSError: [Errno 30] Read-only file system`, it usually means `DATA_DIR` / `DATABASE_PATH` were not loaded and the app tried to create `data/` under `/opt/teleforward` (which is read-only under the hardened unit). Fix by setting:
+  - `DATA_DIR=/var/lib/teleforward`
+  - `DATABASE_PATH=/var/lib/teleforward/teleforward.db`
