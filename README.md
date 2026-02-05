@@ -97,6 +97,13 @@ Set these in `.env` (copy from `.env.example`) or via your environment.
 - `TELEGRAM_API_ID`
 - `TELEGRAM_API_HASH`
 
+### Required for headless/VPS runs
+
+When running in headless mode (`teleforward run` / systemd), TeleForward cannot prompt for a login code, so it needs an existing Telegram session:
+
+- `TELEGRAM_SESSION_STRING` (recommended for VPS), **or**
+- a previously-saved session string in the SQLite DB setting `app_settings.telegram_session_string` (saved automatically when you log in via the TUI with the same `DATABASE_PATH`).
+
 ### Optional (Discord formatting)
 
 - `DISCORD_SUPPRESS_URL_EMBEDS=true` (default): wraps URLs in `<...>` to reduce Discord link-preview embeds.
@@ -122,6 +129,7 @@ TeleForward sends via an internal async queue:
 - If you use the TUI "save session" flow, it stores the session string inside the SQLite database (`DATABASE_PATH`).
 - Keep your data directory private (database + downloads). On Linux, permissions should be restricted to only the service user.
 - Only `https://discord.com/api/webhooks/...` (and Discord's official canary/ptb domains) are accepted to reduce SSRF risk.
+- Treat Discord webhook URLs as secrets (they contain a token). If one leaks, regenerate the webhook in Discord and update TeleForward.
 
 ## Ubuntu VPS (systemd)
 
@@ -145,11 +153,36 @@ This repo includes a systemd unit: `deploy/systemd/teleforward.service`.
    - `/opt/teleforward/.venv/bin/python /opt/teleforward/main.py doctor --test-webhooks`
    - `sudo journalctl -u teleforward -f`
 
+### First-time Telegram login (VPS)
+
+To run the systemd service, you must have a Telegram session available (see [Required for headless/VPS runs](#required-for-headlessvps-runs)).
+
+Recommended flow:
+
+1. Stop the service while you log in (prevents restart loops):
+   - `sudo systemctl stop teleforward`
+   - `sudo systemctl reset-failed teleforward`
+2. Run the TUI with the systemd env file loaded:
+   - `set -a; source /etc/teleforward/teleforward.env; set +a`
+   - `teleforward tui`
+3. In the TUI:
+   - run **Login / refresh session**
+   - then run **Export session string (copy to env)** and paste it into `/etc/teleforward/teleforward.env` as `TELEGRAM_SESSION_STRING=...`
+4. Restart:
+   - `sudo systemctl restart teleforward`
+
 ### VPS tips / troubleshooting
 
 - If you run commands manually (not via systemd), `/etc/teleforward/teleforward.env` is not loaded automatically. Either:
   - activate the venv: `source /opt/teleforward/.venv/bin/activate`
   - or load the env file: `set -a; source /etc/teleforward/teleforward.env; set +a`
+- To make manual runs easier, you can add a helper to `~/.bashrc`:
+  - `teleforward() { set -a; source /etc/teleforward/teleforward.env; set +a; command teleforward "$@"; }`
 - If systemd shows `OSError: [Errno 30] Read-only file system`, it usually means `DATA_DIR` / `DATABASE_PATH` were not loaded and the app tried to create `data/` under `/opt/teleforward` (which is read-only under the hardened unit). Fix by setting:
   - `DATA_DIR=/var/lib/teleforward`
   - `DATABASE_PATH=/var/lib/teleforward/teleforward.db`
+- If you see `sqlite3.OperationalError: unable to open database file`:
+  - check the path is absolute (must start with `/`): `DATABASE_PATH=/var/lib/teleforward/teleforward.db`
+  - ensure `/var/lib/teleforward` is writable by the service user: `sudo -u teleforward test -w /var/lib/teleforward`
+  - remove Windows CRLF if you edited the env on Windows: `sudo sed -i 's/\r$//' /etc/teleforward/teleforward.env`
+- If you see `No TELEGRAM_SESSION_STRING set and no saved session in the database`, run the TUI login flow above (headless mode cannot prompt for login codes).
