@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import sys
 from dataclasses import dataclass
 from getpass import getpass
 from pathlib import Path
@@ -1147,14 +1149,51 @@ async def _run_forwarder(ctx: TuiContext) -> None:
 
     forwarder.set_on_forward_callback(on_forward)
 
-    console.print(Panel("Forwarder running. Press Ctrl+C to stop.", border_style="cyan"))
+    async def wait_for_quit() -> None:
+        while True:
+            line = await asyncio.to_thread(sys.stdin.readline)
+            if not line:
+                return
+            if line.strip().lower() in {"q", "quit", "exit"}:
+                return
+
+    is_tty = False
     try:
-        await forwarder.start()
+        is_tty = sys.stdin.isatty()
+    except Exception:
+        is_tty = False
+
+    hint = "Forwarder running. Type 'q' + Enter (or Ctrl+C) to stop." if is_tty else "Forwarder running. Press Ctrl+C to stop."
+    console.print(Panel(hint, border_style="cyan"))
+
+    try:
+        run_task = asyncio.create_task(forwarder.start(), name="forwarder")
+        quit_task = (
+            asyncio.create_task(wait_for_quit(), name="wait-for-q") if is_tty else None
+        )
+
+        pending: set[asyncio.Task] = {run_task}
+        if quit_task is not None:
+            pending.add(quit_task)
+
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+
+        if quit_task is not None and quit_task in done and not run_task.done():
+            console.print(Panel("Stopping...", border_style="cyan"))
+            await forwarder.stop()
+            try:
+                await asyncio.wait_for(run_task, timeout=10.0)
+            except asyncio.TimeoutError:
+                run_task.cancel()
+        elif not run_task.done():
+            await forwarder.stop()
     except KeyboardInterrupt:
         console.print(Panel("Stopping...", border_style="cyan"))
     finally:
-        await forwarder.stop()
-        await ctx.telegram.stop()
+        try:
+            await forwarder.stop()
+        except Exception:
+            pass
 
 
 async def _test_forward_last_message(ctx: TuiContext) -> None:
