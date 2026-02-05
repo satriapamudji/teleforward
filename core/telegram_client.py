@@ -87,6 +87,40 @@ class TelegramClientWrapper:
             return self.client.session.save()
         return ""
 
+    def export_session_string(self) -> str:
+        """Return a TELEGRAM_SESSION_STRING even if the client is using a file session.
+
+        Telethon's StringSession is just the same auth key + DC info serialized into
+        a string. This method builds a StringSession from the active session data.
+        """
+        if not self.client:
+            return ""
+
+        # If we're already using StringSession, just save it.
+        if isinstance(self.client.session, StringSession):
+            return self.client.session.save()
+
+        sess = getattr(self.client, "session", None)
+        if sess is None:
+            return ""
+
+        try:
+            dc_id = getattr(sess, "dc_id", None)
+            server_address = getattr(sess, "server_address", None)
+            port = getattr(sess, "port", None)
+            auth_key = getattr(sess, "auth_key", None)
+
+            if auth_key is None:
+                return ""
+
+            s = StringSession()
+            if dc_id is not None and server_address is not None and port is not None:
+                s.set_dc(dc_id, server_address, port)
+            s.auth_key = auth_key
+            return s.save()
+        except Exception:
+            return ""
+
     async def get_me(self) -> Optional[User]:
         if self.client:
             result = await self.client.get_me()

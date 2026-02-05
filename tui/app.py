@@ -145,7 +145,7 @@ async def _ensure_telegram_connected(ctx: TuiContext, interactive: bool) -> bool
         password_callback=password_callback,
     )
 
-    session = ctx.telegram.get_session_string()
+    session = ctx.telegram.export_session_string()
     if session:
         ctx.db.set_setting("telegram_session_string", session)
         console.print(Panel("Saved Telegram session string to the database.", border_style="green"))
@@ -212,7 +212,7 @@ async def _export_telegram_session(ctx: TuiContext) -> None:
         console.print(Panel("Telegram login required.", border_style="yellow"))
         return
 
-    session = ctx.telegram.get_session_string()
+    session = ctx.telegram.export_session_string()
     if not session:
         console.print(
             Panel(
