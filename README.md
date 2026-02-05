@@ -22,6 +22,7 @@ TeleForward forwards messages from one or more Telegram channels/groups to one o
 - [Burst handling](#burst-handling)
 - [Security notes](#security-notes)
 - [Ubuntu VPS (systemd)](#ubuntu-vps-systemd)
+- [Deployment scripts](#deployment-scripts)
 
 ## Features
 
@@ -186,3 +187,40 @@ Recommended flow:
   - ensure `/var/lib/teleforward` is writable by the service user: `sudo -u teleforward test -w /var/lib/teleforward`
   - remove Windows CRLF if you edited the env on Windows: `sudo sed -i 's/\r$//' /etc/teleforward/teleforward.env`
 - If you see `No TELEGRAM_SESSION_STRING set and no saved session in the database`, run the TUI login flow above (headless mode cannot prompt for login codes).
+
+## Deployment scripts
+
+These helpers automate common setups. Review scripts before running on a server.
+
+### Ubuntu VPS (end-to-end)
+
+From a cloned repo:
+
+```bash
+sudo bash scripts/vps_install_ubuntu.sh --repo .
+```
+
+From the internet (installer):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/satriapamudji/teleforward/main/scripts/vps_install_ubuntu.sh | sudo bash -s -- \
+  --repo https://github.com/satriapamudji/teleforward.git
+```
+
+Update an existing VPS install:
+
+```bash
+sudo bash /opt/teleforward/scripts/vps_update_ubuntu.sh
+```
+
+### Local (Linux/macOS)
+
+```bash
+bash scripts/local_setup.sh
+```
+
+### Local (Windows PowerShell)
+
+```powershell
+.\scripts\local_setup.ps1
+```
