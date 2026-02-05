@@ -14,6 +14,9 @@ def setup_logging(level: str = "INFO"):
             logging.StreamHandler(),
         ],
     )
+    # Avoid leaking secrets like Discord webhook tokens via HTTP request logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def main():

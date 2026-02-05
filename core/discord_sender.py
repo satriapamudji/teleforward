@@ -2,6 +2,7 @@ import asyncio
 import json
 import random
 import httpx
+import re
 from pathlib import Path
 from typing import Optional, Any
 from dataclasses import dataclass
@@ -20,6 +21,11 @@ class DiscordMessage:
 
 
 class DiscordWebhookSender:
+    _WEBHOOK_TOKEN_RE = re.compile(
+        r"(https?://(?:ptb\\.|canary\\.)?discord(?:app)?\\.com/api/webhooks/\\d+/)\\S+",
+        flags=re.IGNORECASE,
+    )
+
     def __init__(
         self,
         timeout: float = 30.0,
@@ -30,6 +36,10 @@ class DiscordWebhookSender:
         self.max_retries = max_retries
         self.max_backoff_seconds = max_backoff_seconds
         self._client: Optional[httpx.AsyncClient] = None
+
+    @classmethod
+    def _redact(cls, text: str) -> str:
+        return cls._WEBHOOK_TOKEN_RE.sub(r"\\1[REDACTED]", text)
 
     @staticmethod
     def is_discord_webhook_url(webhook_url: str) -> bool:
@@ -84,9 +94,9 @@ class DiscordWebhookSender:
         except httpx.TimeoutException:
             return False, "Request timed out"
         except httpx.HTTPError as e:
-            return False, f"HTTP error: {str(e)}"
+            return False, f"HTTP error: {self._redact(str(e))}"
         except Exception as e:
-            return False, f"Unexpected error: {str(e)}"
+            return False, f"Unexpected error: {self._redact(str(e))}"
 
     async def _send_text(
         self, client: httpx.AsyncClient, webhook_url: str, message: DiscordMessage
@@ -153,10 +163,10 @@ class DiscordWebhookSender:
                 await asyncio.sleep(self._backoff_seconds(attempt))
             except httpx.HTTPError as e:
                 if attempt >= self.max_retries:
-                    return False, f"HTTP error: {str(e)}"
+                    return False, f"HTTP error: {self._redact(str(e))}"
                 await asyncio.sleep(self._backoff_seconds(attempt))
             except Exception as e:
-                return False, f"Unexpected error: {str(e)}"
+                return False, f"Unexpected error: {self._redact(str(e))}"
 
         return False, "Failed after retries"
 
@@ -233,10 +243,10 @@ class DiscordWebhookSender:
                 await asyncio.sleep(self._backoff_seconds(attempt))
             except httpx.HTTPError as e:
                 if attempt >= self.max_retries:
-                    return False, f"HTTP error: {str(e)}"
+                    return False, f"HTTP error: {self._redact(str(e))}"
                 await asyncio.sleep(self._backoff_seconds(attempt))
             except Exception as e:
-                return False, f"Unexpected error: {str(e)}"
+                return False, f"Unexpected error: {self._redact(str(e))}"
         return False, "Failed after retries"
 
     async def test_webhook(self, webhook_url: str) -> tuple[bool, Optional[str]]:
