@@ -56,12 +56,22 @@ pip install -r requirements.txt
 python main.py tui
 ```
 
+### Optional: install as a CLI command
+
+If you prefer running `teleforward ...` instead of `python main.py ...`, install the project into your venv:
+
+```bash
+pip install -e .
+teleforward tui
+```
+
 In the TUI, most prompts accept `q` to go back/cancel, and Ctrl+C exits cleanly.
 
 To run headless (VPS):
 
 ```bash
 python main.py run
+# or: teleforward run
 ```
 
 ## How it works
