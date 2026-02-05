@@ -1,0 +1,37 @@
+[Unit]
+Description=TeleForward (Telegram -> Discord forwarder)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=teleforward
+Group=teleforward
+WorkingDirectory=/opt/teleforward
+EnvironmentFile=/etc/teleforward/teleforward.env
+ExecStart=/opt/teleforward/.venv/bin/python /opt/teleforward/main.py run
+Restart=on-failure
+RestartSec=3
+
+# Create /var/lib/teleforward with correct ownership
+StateDirectory=teleforward
+
+# systemd hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+
+# Allow writes only to the state dir
+ReadWritePaths=/var/lib/teleforward
+
+[Install]
+WantedBy=multi-user.target
+
