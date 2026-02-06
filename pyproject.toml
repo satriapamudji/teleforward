@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "teleforward"
-version = "0.1.0"
-description = "Secure Telegram -> Discord forwarder with a Rich TUI"
+version = "2.0.0"
+description = "Secure Telegram forwarder to Discord and Telegram with a Rich TUI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

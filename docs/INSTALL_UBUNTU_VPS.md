@@ -7,7 +7,9 @@ This guide installs TeleForward as a hardened systemd service on Ubuntu/Debian-i
 - Ubuntu/Debian
 - `python3` (3.10+), `git`, `systemd`
 - A Telegram API ID + hash from `my.telegram.org`
-- A Discord webhook URL for each destination channel
+- Destination targets (as needed):
+  - Discord webhook URL(s)
+  - Telegram destination chat/topic id(s)
 
 ## One-command install
 
@@ -75,7 +77,8 @@ sudo bash /opt/teleforward/scripts/vps_update_ubuntu.sh
 - If systemd shows `OSError: [Errno 30] Read-only file system`, confirm:
   - `DATA_DIR=/var/lib/teleforward`
   - `DATABASE_PATH=/var/lib/teleforward/teleforward.db`
-- If SQLite can’t open the DB:
+- If SQLite can't open the DB:
   - ensure `DATABASE_PATH` starts with `/` (absolute path)
   - remove CRLF from the env file: `sudo sed -i 's/\r$//' /etc/teleforward/teleforward.env`
   - check permissions: `sudo -u teleforward test -w /var/lib/teleforward`
+

@@ -16,7 +16,9 @@ Local:
 
 - Run TUI: `teleforward tui`
 - Run headless: `teleforward run`
-- Validate: `teleforward doctor --test-webhooks`
+- Validate config: `teleforward doctor`
+- Validate destinations: `teleforward doctor --test-webhooks --test-telegram-destinations`
+- Verify v1->v2 mirror state: `teleforward migrate verify-v2`
 
 Ubuntu VPS:
 

@@ -12,9 +12,14 @@ from telethon.tl.types import Message
 from .telegram_client import TelegramClientWrapper, get_telegram_client
 from .discord_sender import DiscordWebhookSender, DiscordMessage, discord_sender
 from .discord_dispatcher import DiscordSendDispatcher, DiscordJob
+from .telegram_sender import (
+    TelegramDestinationSender,
+    TelegramOutgoingMessage,
+    telegram_destination_sender,
+)
 from .transformer import MessageTransformer, TransformRule as TransformerRule
 from database.db import Database
-from database.models import TransformType
+from database.models import TransformType, DestinationType
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +31,7 @@ class Forwarder:
         db: Database,
         telegram: Optional[TelegramClientWrapper] = None,
         discord: Optional[DiscordWebhookSender] = None,
+        telegram_sender: Optional[TelegramDestinationSender] = None,
         allow_mass_mentions: bool = False,
         suppress_url_embeds: bool = True,
         strip_urls: bool = False,
@@ -34,6 +40,7 @@ class Forwarder:
         self.db = db
         self.telegram = telegram
         self.discord = discord or discord_sender
+        self.telegram_sender = telegram_sender or telegram_destination_sender
         self.allow_mass_mentions = allow_mass_mentions
         self.suppress_url_embeds = suppress_url_embeds
         self.strip_urls = strip_urls
@@ -130,46 +137,60 @@ class Forwarder:
         self._channel_webhook_map.clear()
         self._channel_transformer_map.clear()
 
-        all_mappings = self.db.get_channel_mappings(active_only=True)
+        self._load_mappings_v2()
+
+        for telegram_channel_id in self._channel_webhook_map.keys():
+            transformer = self._build_transformer_for_channel(telegram_channel_id)
+            self._channel_transformer_map[telegram_channel_id] = transformer
+
+    def _load_mappings_v2(self) -> bool:
+        all_route_rows = self.db.get_route_rows(active_only=True)
+        if not all_route_rows:
+            return False
+
         all_groups = self.db.get_forwarding_groups()
-        all_channels = self.db.get_telegram_channels()
-        all_webhooks = self.db.get_discord_webhooks()
-
         active_groups = {g.id: g for g in all_groups if g.is_active}
-        channel_map = {c.id: c for c in all_channels}
-        webhook_map = {w.id: w for w in all_webhooks}
 
-        for mapping in all_mappings:
-            if mapping.group_id and mapping.group_id not in active_groups:
+        for row in all_route_rows:
+            group_id = row.get("group_id")
+            if group_id and group_id not in active_groups:
                 continue
 
-            channel = channel_map.get(mapping.channel_id)
-            webhook = webhook_map.get(mapping.webhook_id)
+            if row.get("destination_type") != DestinationType.DISCORD_WEBHOOK.value:
+                if row.get("destination_type") != DestinationType.TELEGRAM_CHAT.value:
+                    continue
+                telegram_chat_id = row.get("telegram_chat_id")
+                if telegram_chat_id is None:
+                    continue
+                webhook_url: Optional[str] = None
+            else:
+                webhook_url = row.get("discord_webhook_url")
+                if not webhook_url:
+                    continue
+                telegram_chat_id = None
 
-            if not channel or not channel.is_active:
-                continue
-            if not webhook or not webhook.is_active:
-                continue
-
-            telegram_channel_id = channel.channel_id
+            telegram_channel_id = row["source_channel_id"]
             if telegram_channel_id not in self._channel_webhook_map:
                 self._channel_webhook_map[telegram_channel_id] = []
 
             self._channel_webhook_map[telegram_channel_id].append(
                 {
-                    "webhook_id": webhook.id,
-                    "webhook_url": webhook.url,
-                    "webhook_name": webhook.name,
-                    "mapping_id": mapping.id,
-                    "group_id": mapping.group_id,
-                    "channel_name": channel.name,
-                    "channel_username": channel.username,
+                    "webhook_id": row["destination_id"],
+                    "webhook_url": webhook_url,
+                    "webhook_name": row["destination_name"],
+                    "rule_mapping_id": row.get("legacy_channel_mapping_id"),
+                    "route_mapping_id": row["route_id"],
+                    "destination_type": row["destination_type"],
+                    "destination_name": row["destination_name"],
+                    "telegram_chat_id": telegram_chat_id,
+                    "telegram_topic_id": row.get("telegram_topic_id"),
+                    "group_id": group_id,
+                    "channel_name": row["source_channel_name"],
+                    "channel_username": row["source_channel_username"],
                 }
             )
 
-        for telegram_channel_id in self._channel_webhook_map.keys():
-            transformer = self._build_transformer_for_channel(telegram_channel_id)
-            self._channel_transformer_map[telegram_channel_id] = transformer
+        return bool(self._channel_webhook_map)
 
     def _build_transformer_for_channel(
         self, telegram_channel_id: int
@@ -178,7 +199,9 @@ class Forwarder:
 
         webhooks_info = self._channel_webhook_map.get(telegram_channel_id, [])
         group_ids = set(w["group_id"] for w in webhooks_info if w["group_id"])
-        mapping_ids = set(w["mapping_id"] for w in webhooks_info)
+        mapping_ids = set(
+            w["rule_mapping_id"] for w in webhooks_info if w.get("rule_mapping_id")
+        )
 
         for group_id in group_ids:
             db_rules = self.db.get_transform_rules(group_id=group_id)
@@ -220,15 +243,31 @@ class Forwarder:
         )
 
     async def _handle_message(self, message: Message):
+        if getattr(message, "out", False):
+            # Prevent loops when forwarding into chats where this account also listens.
+            return
+
         chat_id = getattr(message, "chat_id", None) or getattr(
             message.peer_id, "channel_id", None
         )
         if not chat_id:
             return
-
-        webhooks = self._channel_webhook_map.get(chat_id, [])
-        if not webhooks:
+        if not self.telegram:
             return
+
+        routes = self._channel_webhook_map.get(chat_id, [])
+        if not routes:
+            return
+        telegram_routes = [
+            r
+            for r in routes
+            if r.get("destination_type") == DestinationType.TELEGRAM_CHAT.value
+        ]
+        discord_routes = [
+            r
+            for r in routes
+            if r.get("destination_type") == DestinationType.DISCORD_WEBHOOK.value
+        ]
 
         text = getattr(message, "text", "") or getattr(message, "message", "") or ""
         if getattr(message, "media", None) and not text.strip():
@@ -257,26 +296,66 @@ class Forwarder:
             )
 
         media_ref = None
-        if media_path and self._dispatcher and webhooks:
+        if media_path and self._dispatcher and discord_routes:
             media_ref = self._dispatcher.make_media_ref(
                 path=media_path,
-                fanout=len(webhooks),
+                fanout=len(discord_routes),
             )
 
-        for webhook_info in webhooks:
-            channel_name = webhook_info.get("channel_name") or str(chat_id)
-            channel_username = webhook_info.get("channel_username")
+        transformed = self._neutralize_mass_mentions(transform_result.transformed_text)
+
+        for route_info in telegram_routes:
+            destination_chat_id = route_info.get("telegram_chat_id")
+            if destination_chat_id is None:
+                continue
+            if destination_chat_id == chat_id:
+                logger.debug("Skipping loop route source=%s destination=%s", chat_id, destination_chat_id)
+                continue
+
+            channel_name = route_info.get("channel_name") or str(chat_id)
+            channel_username = route_info.get("channel_username")
             resolved_sender = sender_name or channel_name
 
             telegram_link: Optional[str] = None
             if channel_username and getattr(message, "id", None):
                 telegram_link = f"https://t.me/{channel_username}/{message.id}"
 
-            transformed = self._neutralize_mass_mentions(
-                transform_result.transformed_text
+            outgoing_text = self._build_telegram_text(
+                channel_name=channel_name,
+                sender_name=resolved_sender,
+                text=transformed,
+                telegram_link=telegram_link,
             )
 
-            attachment_name = Path(media_path).name if media_path else None
+            success, error = await self.telegram_sender.send(
+                telegram=self.telegram,
+                chat_id=int(destination_chat_id),
+                message=TelegramOutgoingMessage(
+                    text=outgoing_text,
+                    file_path=media_path,
+                    topic_id=route_info.get("telegram_topic_id"),
+                ),
+            )
+            await self._record_direct_result(
+                route_info=route_info,
+                source_channel_id=chat_id,
+                message_id=message.id,
+                original_text=transform_result.original_text,
+                transformed_text=transform_result.transformed_text,
+                has_media=media_path is not None,
+                success=success,
+                error=error,
+            )
+
+        attachment_name = Path(media_path).name if media_path else None
+        for route_info in discord_routes:
+            channel_name = route_info.get("channel_name") or str(chat_id)
+            channel_username = route_info.get("channel_username")
+            resolved_sender = sender_name or channel_name
+
+            telegram_link: Optional[str] = None
+            if channel_username and getattr(message, "id", None):
+                telegram_link = f"https://t.me/{channel_username}/{message.id}"
 
             embed = self._build_embed(
                 channel_name=channel_name,
@@ -301,9 +380,13 @@ class Forwarder:
                 continue
 
             job = DiscordJob(
-                webhook_url=webhook_info["webhook_url"],
-                webhook_name=webhook_info["webhook_name"],
-                mapping_id=webhook_info["mapping_id"],
+                webhook_url=route_info["webhook_url"],
+                webhook_name=route_info["webhook_name"],
+                route_mapping_id=route_info.get("route_mapping_id"),
+                destination_type=route_info.get(
+                    "destination_type", DestinationType.DISCORD_WEBHOOK.value
+                ),
+                destination_name=route_info.get("destination_name"),
                 channel_id=chat_id,
                 message_id=message.id,
                 timestamp=datetime.now(),
@@ -315,6 +398,79 @@ class Forwarder:
             )
             await self._dispatcher.enqueue(job)
 
+        if media_path and (not self._dispatcher or not discord_routes):
+            try:
+                Path(media_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _build_telegram_text(
+        self,
+        channel_name: str,
+        sender_name: str,
+        text: str,
+        telegram_link: Optional[str],
+    ) -> str:
+        lines = [f"[{channel_name}]"]
+        if sender_name and sender_name != channel_name:
+            lines.append(sender_name)
+        lines.append(text.strip() if text.strip() else "(no text)")
+        if telegram_link and self.include_telegram_link:
+            lines.append(telegram_link)
+        out = "\n\n".join(line for line in lines if line)
+        if len(out) > 4096:
+            out = out[:4093] + "..."
+        return out
+
+    async def _record_direct_result(
+        self,
+        *,
+        route_info: dict,
+        source_channel_id: int,
+        message_id: int,
+        original_text: Optional[str],
+        transformed_text: Optional[str],
+        has_media: bool,
+        success: bool,
+        error: Optional[str],
+    ) -> None:
+        route_mapping_id = route_info.get("route_mapping_id")
+
+        if route_mapping_id is not None:
+            self.db.add_forward_log_v2(
+                route_mapping_id=route_mapping_id,
+                telegram_message_id=message_id,
+                destination_type=route_info.get(
+                    "destination_type", DestinationType.TELEGRAM_CHAT.value
+                ),
+                destination_name=route_info.get("destination_name"),
+                original_text=original_text[:1000] if original_text else None,
+                transformed_text=transformed_text[:1000] if transformed_text else None,
+                has_media=has_media,
+                status="success" if success else "error",
+                error_message=error,
+            )
+
+        if self._on_forward_callback:
+            event = {
+                "channel_id": source_channel_id,
+                "message_id": message_id,
+                "webhook_name": route_info.get("destination_name") or "?",
+                "destination_type": route_info.get(
+                    "destination_type", DestinationType.TELEGRAM_CHAT.value
+                ),
+                "destination_name": route_info.get("destination_name"),
+                "success": success,
+                "error": error,
+                "timestamp": datetime.now(),
+            }
+            try:
+                callback_result = self._on_forward_callback(event)
+                if asyncio.iscoroutine(callback_result):
+                    await callback_result
+            except Exception:
+                logger.exception("Forward callback failed")
+
     async def start(self):
         if not self.telegram:
             self.telegram = get_telegram_client()
@@ -325,7 +481,7 @@ class Forwarder:
 
         channel_ids = list(self._channel_webhook_map.keys())
         if not channel_ids:
-            logger.warning("No channel mappings configured")
+            logger.warning("No active v2 routes configured")
             return
 
         self.telegram.set_message_handler(self._handle_message)

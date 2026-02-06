@@ -2,7 +2,7 @@
 
 # TeleForward (TUI)
 
-Secure Telegram -> Discord forwarder with a Rich terminal UI.
+Secure Telegram forwarder to Discord and/or Telegram destinations, with a Rich terminal UI.
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![TUI](https://img.shields.io/badge/TUI-rich-6A5ACD)
@@ -11,7 +11,11 @@ Secure Telegram -> Discord forwarder with a Rich terminal UI.
 
 </div>
 
-TeleForward forwards messages from one or more Telegram channels/groups to one or more Discord channels using Discord webhooks. It is designed for VPS use (systemd included) and day-to-day operation via a Rich-based TUI.
+TeleForward forwards messages from one or more Telegram channels/groups to one or more destinations:
+- Discord channels (via webhooks)
+- Telegram channels/groups/topics
+
+It is designed for VPS use (systemd included) and day-to-day operation via a Rich-based TUI.
 
 > [!WARNING]
 > Discord webhook URLs and `TELEGRAM_SESSION_STRING` are secrets. Do not paste them into logs, issues, or chat transcripts. If a webhook URL leaks, regenerate it in Discord.
@@ -30,10 +34,11 @@ TeleForward forwards messages from one or more Telegram channels/groups to one o
 
 ## What you get
 
-- Telegram (user session) -> Discord (webhooks), no Discord bot token needed
-- Multiple mappings:
-  - many Telegram channels -> one webhook
-  - one Telegram channel -> many webhooks
+- Telegram (user session) -> Discord/Telegram destinations
+- Multiple routing patterns:
+  - many Telegram channels -> one destination
+  - one Telegram channel -> many destinations
+  - mixed fanout (Discord + Telegram)
 - Messages stay separate (no batching), sent via a queue with retries
 - Discord embeds:
   - per-channel accent color
@@ -119,6 +124,8 @@ Commands:
 teleforward tui      # interactive setup + tools
 teleforward run      # headless forwarder (VPS)
 teleforward doctor   # config sanity checks
+teleforward config   # manage local .env values
+teleforward migrate verify-v2  # verify legacy v1 rows are mirrored into v2
 ```
 
 Systemd:

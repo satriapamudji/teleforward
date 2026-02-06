@@ -33,7 +33,9 @@ class _MediaRef:
 class DiscordJob:
     webhook_url: str
     webhook_name: str
-    mapping_id: int
+    route_mapping_id: Optional[int]
+    destination_type: str
+    destination_name: Optional[str]
     channel_id: int
     message_id: int
     timestamp: datetime
@@ -116,23 +118,28 @@ class DiscordSendDispatcher:
         self, job: DiscordJob, success: bool, error: Optional[str]
     ) -> None:
         async with self._db_lock:
-            self.db.add_forward_log(
-                mapping_id=job.mapping_id,
-                telegram_message_id=job.message_id,
-                original_text=job.original_text[:1000] if job.original_text else None,
-                transformed_text=job.transformed_text[:1000]
-                if job.transformed_text
-                else None,
-                has_media=job.has_media,
-                status="success" if success else "error",
-                error_message=error,
-            )
+            if job.route_mapping_id is not None:
+                self.db.add_forward_log_v2(
+                    route_mapping_id=job.route_mapping_id,
+                    telegram_message_id=job.message_id,
+                    destination_type=job.destination_type,
+                    destination_name=job.destination_name,
+                    original_text=job.original_text[:1000] if job.original_text else None,
+                    transformed_text=job.transformed_text[:1000]
+                    if job.transformed_text
+                    else None,
+                    has_media=job.has_media,
+                    status="success" if success else "error",
+                    error_message=error,
+                )
 
         if self.on_forward_callback:
             event = {
                 "channel_id": job.channel_id,
                 "message_id": job.message_id,
                 "webhook_name": job.webhook_name,
+                "destination_type": job.destination_type,
+                "destination_name": job.destination_name,
                 "success": success,
                 "error": error,
                 "timestamp": job.timestamp,
