@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-Last updated: `2026-02-06 21:22:02 +08:00` (local time)
+Last updated: `2026-02-07 13:44:15 +08:00` (local time)
 
-## [Unreleased] - Logged `2026-02-06 21:22:02 +08:00`
+## [Unreleased] - Logged `2026-02-07 13:44:15 +08:00`
 
 ### Added
 - v2 planning documentation for multi-destination forwarding (Discord + Telegram):
@@ -87,6 +87,11 @@ Last updated: `2026-02-06 21:22:02 +08:00` (local time)
   - install guide prereqs now include Discord and Telegram destination targets
   - fixed install guide encoding typo in SQLite troubleshooting note
   - LLM guide now shows both baseline and destination-level doctor validation commands
+
+### Security
+- fix Discord webhook token redaction (avoid leaking tokens in exceptions/diagnostics)
+- redact webhook URLs in TUI destination/route tables
+- remove tracked `.env` and ignore `.env.*` while keeping `.env.example`
 
 ## [2.0.0] - Planned (remaining) (logged `2026-02-06 18:30:11 +08:00`)
 

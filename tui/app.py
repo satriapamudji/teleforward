@@ -22,7 +22,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from config import Config
-from core.discord_sender import discord_sender, DiscordMessage
+from core.discord_sender import DiscordWebhookSender, discord_sender, DiscordMessage
 from core.forwarder import Forwarder
 from core.telegram_sender import TelegramOutgoingMessage, telegram_destination_sender
 from core.telegram_client import TelegramClientWrapper, set_telegram_client
@@ -1445,9 +1445,10 @@ def _destination_target_label(row: dict) -> str:
         url = str(row.get("discord_webhook_url") or "")
         if not url:
             return "(missing webhook url)"
-        if len(url) <= 32:
-            return url
-        return f"{url[:24]}..."
+        redacted = DiscordWebhookSender.redact_webhook_url(url)
+        if len(redacted) <= 32:
+            return redacted
+        return f"{redacted[:24]}..."
 
     if destination_type == DestinationType.TELEGRAM_CHAT.value:
         chat_id = row.get("telegram_chat_id")
@@ -2605,7 +2606,9 @@ async def _test_forward_last_message(ctx: TuiContext) -> None:
     for i, route in enumerate(route_infos, start=1):
         destination_type = str(route.get("destination_type") or "")
         if destination_type == DestinationType.DISCORD_WEBHOOK.value:
-            target = str(route.get("webhook_url") or "-")
+            target = DiscordWebhookSender.redact_webhook_url(
+                str(route.get("webhook_url") or "-")
+            )
             if len(target) > 36:
                 target = target[:30] + "..."
         elif destination_type == DestinationType.TELEGRAM_CHAT.value:

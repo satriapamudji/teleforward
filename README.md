@@ -19,6 +19,8 @@ It is designed for VPS use (systemd included) and day-to-day operation via a Ric
 
 > [!WARNING]
 > Discord webhook URLs and `TELEGRAM_SESSION_STRING` are secrets. Do not paste them into logs, issues, or chat transcripts. If a webhook URL leaks, regenerate it in Discord.
+>
+> `.env` is intentionally gitignored. If you ever committed a real `.env` to GitHub, assume those values are compromised and rotate/remove them.
 
 ## Contents
 
@@ -160,7 +162,10 @@ Set these in `.env` (local) or `/etc/teleforward/teleforward.env` (VPS).
 - Prefer storing `TELEGRAM_SESSION_STRING` in a secret manager on VPS.
 - Keep `/etc/teleforward/teleforward.env` mode `600` and owned by the service user.
 - Webhook URLs are validated to Discord domains and HTTPS to reduce SSRF risk.
-- Webhook tokens are redacted from errors and HTTP request logging is suppressed by default.
+- Webhook tokens are redacted from errors/diagnostics and HTTP request logging is suppressed by default.
+- If you previously committed `.env` (or pasted webhook URLs/session strings) to GitHub:
+  - regenerate affected Discord webhooks
+  - delete the leaked file from git (`git rm --cached .env`) and consider rewriting history (e.g. `git filter-repo`) before pushing
 
 ## Deployment scripts
 

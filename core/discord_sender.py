@@ -22,7 +22,7 @@ class DiscordMessage:
 
 class DiscordWebhookSender:
     _WEBHOOK_TOKEN_RE = re.compile(
-        r"(https?://(?:ptb\\.|canary\\.)?discord(?:app)?\\.com/api/webhooks/\\d+/)\\S+",
+        r"(https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/)\S+",
         flags=re.IGNORECASE,
     )
 
@@ -38,8 +38,12 @@ class DiscordWebhookSender:
         self._client: Optional[httpx.AsyncClient] = None
 
     @classmethod
+    def redact_webhook_url(cls, text: str) -> str:
+        return cls._WEBHOOK_TOKEN_RE.sub(r"\1[REDACTED]", text)
+
+    @classmethod
     def _redact(cls, text: str) -> str:
-        return cls._WEBHOOK_TOKEN_RE.sub(r"\\1[REDACTED]", text)
+        return cls.redact_webhook_url(text)
 
     @staticmethod
     def is_discord_webhook_url(webhook_url: str) -> bool:
@@ -183,6 +187,7 @@ class DiscordWebhookSender:
         text = (response.text or "").strip()
         if len(text) > 500:
             text = text[:497] + "..."
+        text = self._redact(text)
 
         # Rate limit
         if response.status_code == 429:
@@ -263,7 +268,7 @@ class DiscordWebhookSender:
             else:
                 return False, f"Invalid webhook: status {response.status_code}"
         except Exception as e:
-            return False, str(e)
+            return False, self._redact(str(e))
 
 
 discord_sender = DiscordWebhookSender()
