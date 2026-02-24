@@ -91,19 +91,112 @@ class Forwarder:
         return label, body
 
     @staticmethod
-    def _strip_telegram_output_mentions(text: str) -> str:
-        # Strip plain social handles like "@WatcherGuru" while avoiding emails/URLs.
-        out = re.sub(r"(?<![\w/])@[A-Za-z0-9_]{2,}(?![\w])", "", text or "")
+    def _telegram_source_key(source_label: Optional[str]) -> str:
+        return re.sub(r"[^a-z0-9]+", "", (source_label or "").lower())
+
+    @staticmethod
+    def _prettify_infinityhedge_weekly_digest(
+        text: str, *, source_label: Optional[str] = None
+    ) -> str:
+        out = (text or "").strip()
+        if not out:
+            return out
+
+        if source_label:
+            src = re.escape(source_label.strip())
+            out = re.sub(rf"(?i)(:\s*){src}\b\s*", r"\1", out, count=1)
+            out = re.sub(rf"(?i)(\b[A-Z]{{2,20}})\s*:\s*{src}\b", r"\1", out)
+
+        out = re.sub(
+            r"(?<!^)(?<!\n)\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun):\s*",
+            r"\n\n\1: ",
+            out,
+        )
+        out = re.sub(r"\s+ICYMI:\s*", "\n\nICYMI:\n", out, flags=re.IGNORECASE)
+        out = re.sub(r"(?<!\*)\s+\*(?!\*)\s*(?=\S)", "\n- ", out)
+        out = re.sub(r"(?m)^\*(?!\*)\s*(?=\S)", "- ", out)
         out = re.sub(r"[ \t]+\n", "\n", out)
-        out = re.sub(r"[ \t]{2,}", " ", out)
+        out = re.sub(r"\n{3,}", "\n\n", out)
+        out = re.sub(
+            r"\s+(https?://[^\s]+)$",
+            r" [Read more](\1)",
+            out,
+            count=1,
+        )
+        return out.strip()
+
+    def _apply_telegram_source_rules(
+        self,
+        text: str,
+        *,
+        source_label: Optional[str],
+    ) -> str:
+        out = (text or "").strip()
+        key = self._telegram_source_key(source_label)
+
+        if key == "watcherguru":
+            out = re.sub(r"(?<![\w/])@WatcherGuru(?![\w])", "", out, flags=re.IGNORECASE)
+        elif key == "unfolded":
+            out = re.sub(
+                r"\s*\|\s*\[AI comment\]\((https?://[^\s)]+)\)",
+                "",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(
+                r"\[AI comment\]\((https?://[^\s)]+)\)",
+                "",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(
+                r"\[\s*[\-??]?\s*link\s*\]\((https?://[^\s)]+)\)",
+                r"[Read more](\1)",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(r"\s+\|\s*$", "", out)
+        elif key == "infinityhedge" and re.search(r"(?i)\bThe Week Ahead:", out):
+            out = self._prettify_infinityhedge_weekly_digest(
+                out, source_label=source_label
+            )
+
+        out = re.sub(r"[ \t]+\n", "\n", out)
         out = re.sub(r"\n{3,}", "\n\n", out)
         return out.strip()
 
-    @staticmethod
-    def _telegram_body_to_html(text: str) -> str:
-        escaped = html.escape(text or "")
-        # Preserve common Telegram/Markdown-style bold markers in forwarded text.
-        return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+    def _telegram_body_to_html(self, text: str, *, source_label: Optional[str]) -> str:
+        raw = (text or "").strip()
+        placeholders: list[tuple[str, str]] = []
+        allow_md_links = self._telegram_source_key(source_label) in {
+            "unfolded",
+            "infinityhedge",
+        }
+
+        def _md_link_repl(match: re.Match[str]) -> str:
+            label = (match.group(1) or "").strip()
+            url = (match.group(2) or "").strip()
+            if not label or not url:
+                return match.group(0)
+            token = f"__TF_LINK_{len(placeholders)}__"
+            anchor = (
+                f'<a href="{html.escape(url, quote=True)}">'
+                f"{html.escape(label)}</a>"
+            )
+            placeholders.append((token, anchor))
+            return token
+
+        if allow_md_links:
+            raw = re.sub(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)", _md_link_repl, raw)
+            raw = re.sub(r"\s+\|\s+", " | ", raw)
+            raw = re.sub(r"\s+\|$", "", raw)
+        raw = re.sub(r"\n{3,}", "\n\n", raw).strip()
+
+        escaped = html.escape(raw)
+        escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+        for token, anchor in placeholders:
+            escaped = escaped.replace(html.escape(token), anchor)
+        return escaped
 
     @staticmethod
     def _embed_color(key: str) -> int:
@@ -439,11 +532,11 @@ class Forwarder:
         telegram_link: Optional[str],
     ) -> str:
         source_label, body = self._extract_leading_source_label(text)
-        body = self._strip_telegram_output_mentions(body)
+        body = self._apply_telegram_source_rules(body, source_label=source_label)
         if not body:
             body = "(no text)"
 
-        body_html = self._telegram_body_to_html(body)
+        body_html = self._telegram_body_to_html(body, source_label=source_label)
         footer_html = None
         if source_label or sender_name or channel_name:
             if telegram_link and self.include_telegram_link:
