@@ -353,9 +353,10 @@ def _print_channels(ctx: TuiContext) -> None:
     table.add_column("#", style="key", no_wrap=True, width=4)
     table.add_column("Name", style="heading", ratio=1, overflow="fold")
     table.add_column("Username", style="dim", ratio=1, overflow="fold")
-    table.add_column("Source Group", style="value", ratio=1, overflow="fold")
+    table.add_column("Source Groups", style="value", ratio=1, overflow="fold")
     table.add_column("Channel ID", style="value", overflow="ellipsis", max_width=18)
     table.add_column("Status", no_wrap=True)
+    membership_map = ctx.db.get_source_group_membership_map(active_only=False)
     for i, ch in enumerate(channels, start=1):
         status = (
             Text("✔ active", style="ok")
@@ -366,7 +367,7 @@ def _print_channels(ctx: TuiContext) -> None:
             str(i),
             ch.name,
             f"@{ch.username}" if ch.username else "-",
-            getattr(ch, "source_group", None) or "-",
+            ", ".join(membership_map.get(int(ch.id), [])) or "-",
             str(ch.channel_id),
             status,
         )
@@ -647,25 +648,28 @@ async def _import_channels(ctx: TuiContext) -> None:
 
     try:
         import_source_group = _prompt(
-            "Source group for imported channels (optional, blank for none)",
+            "Source groups for imported channels (optional, comma-separated)",
             default="",
         ).strip()
     except CancelAction:
         console.print(_feedback("[warn]âš [/warn] Canceled."))
         return
 
+    import_source_groups = _parse_source_group_labels(import_source_group)
     imported = 0
     selected = [dialogs_by_id[i] for i in selected_ids if i in dialogs_by_id]
     for d in selected:
         existing = ctx.db.get_telegram_channel(d["id"])
         if existing is None:
             imported += 1
-        ctx.db.add_telegram_channel(
+        saved = ctx.db.add_telegram_channel(
             d["id"],
             d["name"],
             d.get("username"),
-            source_group=import_source_group or None,
+            source_group=(import_source_groups[0] if import_source_groups else None),
         )
+        if import_source_groups and saved is not None:
+            ctx.db.set_telegram_channel_source_groups(int(saved.id), import_source_groups)
 
     console.print(
         _feedback(
@@ -680,33 +684,65 @@ def _add_channel_manual(ctx: TuiContext) -> None:
         channel_id = _prompt_int("Source Telegram channel id (e.g. -1001234567890)")
         name = _prompt("Name")
         username = _prompt("Username (optional, without @)", default="")
-        source_group = _prompt("Source group (optional, e.g. crypto)", default="")
+        source_group = _prompt(
+            "Source groups (optional, comma-separated, e.g. crypto,alpha)",
+            default="",
+        )
     except CancelAction:
         console.print(_feedback("[warn]⚠[/warn] Canceled."))
         return
     username = username or None
-    source_group = source_group.strip() or None
+    source_groups = _parse_source_group_labels(source_group)
     if not name:
         console.print(_feedback("[warn]⚠[/warn] Name is required."))
         return
-    ctx.db.add_telegram_channel(
-        channel_id, name, username, source_group=source_group
+    saved = ctx.db.add_telegram_channel(
+        channel_id,
+        name,
+        username,
+        source_group=(source_groups[0] if source_groups else None),
     )
+    if source_groups and saved is not None:
+        ctx.db.set_telegram_channel_source_groups(int(saved.id), source_groups)
     console.print(_feedback("[ok]✔[/ok] Saved.", title="Telegram channel"))
+
+
+def _parse_source_group_labels(raw: str) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+    for part in (raw or "").split(","):
+        clean = part.strip()
+        if not clean:
+            continue
+        key = clean.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append(clean)
+    return labels
+
+
+def _channel_source_group_label(
+    membership_map: dict[int, list[str]],
+    channel,
+) -> str:
+    if channel is None:
+        return "-"
+    names = membership_map.get(int(channel.id), [])
+    return ", ".join(names) if names else "-"
 
 
 def _source_group_catalog(ctx: TuiContext, channels: list) -> list[tuple[str, list]]:
     registry_names = ctx.db.get_source_group_registry()
     display_by_key: dict[str, str] = {n.lower(): n for n in registry_names}
     members_by_key: dict[str, list] = {n.lower(): [] for n in registry_names}
+    membership_map = ctx.db.get_source_group_membership_map(active_only=False)
 
     for ch in channels:
-        raw = (getattr(ch, "source_group", None) or "").strip()
-        if not raw:
-            continue
-        key = raw.lower()
-        display_by_key.setdefault(key, raw)
-        members_by_key.setdefault(key, []).append(ch)
+        for raw in membership_map.get(int(ch.id), []):
+            key = raw.lower()
+            display_by_key.setdefault(key, raw)
+            members_by_key.setdefault(key, []).append(ch)
 
     return [
         (display_by_key[key], members_by_key.get(key, []))
@@ -759,15 +795,16 @@ def _select_route_sources(ctx: TuiContext, channels: list) -> list:
     )
     channel_table.add_column("#", style="key", no_wrap=True, width=4)
     channel_table.add_column("Name", style="heading", ratio=1, overflow="fold")
-    channel_table.add_column("Source Group", style="value", ratio=1, overflow="fold")
+    channel_table.add_column("Source Groups", style="value", ratio=1, overflow="fold")
     channel_table.add_column(
         "Channel ID", style="value", overflow="ellipsis", max_width=18
     )
+    membership_map = ctx.db.get_source_group_membership_map(active_only=False)
     for i, ch in enumerate(channels, start=1):
         channel_table.add_row(
             str(i),
             ch.name,
-            getattr(ch, "source_group", None) or "-",
+            _channel_source_group_label(membership_map, ch),
             str(ch.channel_id),
         )
     console.print(channel_table)
@@ -783,6 +820,7 @@ def _manage_source_groups(ctx: TuiContext) -> None:
     while True:
         channels = ctx.db.get_telegram_channels(active_only=False)
         groups = _source_group_catalog(ctx, channels)
+        membership_map = ctx.db.get_source_group_membership_map(active_only=False)
 
         table = Table(
             title="Source groups",
@@ -844,13 +882,13 @@ def _manage_source_groups(ctx: TuiContext) -> None:
         )
         members_table.add_column("#", style="key", no_wrap=True, width=4)
         members_table.add_column("Name", style="heading", ratio=1, overflow="fold")
-        members_table.add_column("Current Group", style="value", ratio=1, overflow="fold")
+        members_table.add_column("Current Groups", style="value", ratio=1, overflow="fold")
         members_table.add_column("Channel ID", style="value", overflow="ellipsis", max_width=18)
         for i, ch in enumerate(members, start=1):
             members_table.add_row(
                 str(i),
                 ch.name,
-                getattr(ch, "source_group", None) or "-",
+                _channel_source_group_label(membership_map, ch),
                 str(ch.channel_id),
             )
         console.print(members_table)
@@ -863,7 +901,7 @@ def _manage_source_groups(ctx: TuiContext) -> None:
         group_actions.add_column("Key", style="key", no_wrap=True, width=4)
         group_actions.add_column("Action", style="white")
         group_actions.add_row("1", "Rename group")
-        group_actions.add_row("2", "Add/assign sources to this group")
+        group_actions.add_row("2", "Add sources to this group")
         group_actions.add_row("3", "Remove sources from this group")
         group_actions.add_row("4", "Clear all sources from this group")
         group_actions.add_row("5", "Delete group (clears memberships)")
@@ -902,13 +940,13 @@ def _manage_source_groups(ctx: TuiContext) -> None:
             )
             assign_table.add_column("#", style="key", no_wrap=True, width=4)
             assign_table.add_column("Name", style="heading", ratio=1, overflow="fold")
-            assign_table.add_column("Current Group", style="value", ratio=1, overflow="fold")
+            assign_table.add_column("Current Groups", style="value", ratio=1, overflow="fold")
             assign_table.add_column("Channel ID", style="value", overflow="ellipsis", max_width=18)
             for i, ch in enumerate(channels, start=1):
                 assign_table.add_row(
                     str(i),
                     ch.name,
-                    getattr(ch, "source_group", None) or "-",
+                    _channel_source_group_label(membership_map, ch),
                     str(ch.channel_id),
                 )
             console.print(assign_table)
@@ -920,7 +958,7 @@ def _manage_source_groups(ctx: TuiContext) -> None:
             except CancelAction:
                 continue
             for i in idxs:
-                ctx.db.set_telegram_channel_source_group(channels[i - 1].id, group_name)
+                ctx.db.add_source_group_membership(channels[i - 1].id, group_name)
             console.print(_feedback("Sources assigned to group."))
             continue
         if action == "3":
@@ -935,7 +973,7 @@ def _manage_source_groups(ctx: TuiContext) -> None:
             except CancelAction:
                 continue
             for i in idxs:
-                ctx.db.set_telegram_channel_source_group(members[i - 1].id, None)
+                ctx.db.remove_source_group_membership(members[i - 1].id, group_name)
             console.print(_feedback("Sources removed from group."))
             continue
         if action == "4":
@@ -947,7 +985,7 @@ def _manage_source_groups(ctx: TuiContext) -> None:
                 console.print(_feedback("Canceled."))
                 continue
             for ch in members:
-                ctx.db.set_telegram_channel_source_group(ch.id, None)
+                ctx.db.remove_source_group_membership(ch.id, group_name)
             console.print(_feedback("Group memberships cleared."))
             continue
         if action == "5":
@@ -1096,8 +1134,10 @@ def _manage_channels(ctx: TuiContext) -> None:
     table.add_column("#", style="key", no_wrap=True, width=4)
     table.add_column("Name", style="heading", ratio=1, overflow="fold")
     table.add_column("Username", style="dim", ratio=1, overflow="fold")
+    table.add_column("Source Groups", style="value", ratio=1, overflow="fold")
     table.add_column("Channel ID", style="value", overflow="ellipsis", max_width=18)
     table.add_column("Status", no_wrap=True)
+    membership_map = ctx.db.get_source_group_membership_map(active_only=False)
     for i, ch in enumerate(channels, start=1):
         status = (
             Text("✔ active", style="ok")
@@ -1108,6 +1148,7 @@ def _manage_channels(ctx: TuiContext) -> None:
             str(i),
             ch.name,
             f"@{ch.username}" if ch.username else "-",
+            _channel_source_group_label(membership_map, ch),
             str(ch.channel_id),
             status,
         )
@@ -1124,7 +1165,7 @@ def _manage_channels(ctx: TuiContext) -> None:
     actions.add_column("Action", style="white")
     actions.add_row("1", "Toggle active/disabled")
     actions.add_row("2", "Rename / update username")
-    actions.add_row("3", "Set source group")
+    actions.add_row("3", "Set source groups")
     actions.add_row("4", "Delete channel (and its mappings/logs)")
     actions.add_row("0", "Back")
     console.print(actions)
@@ -1160,11 +1201,17 @@ def _manage_channels(ctx: TuiContext) -> None:
         return
     if choice == "3":
         try:
-            current = getattr(ch, "source_group", None) or ""
-            new_group = _prompt("Source group (blank to clear)", default=current)
+            current = ",".join(ctx.db.get_telegram_channel_source_groups(ch.id))
+            new_group = _prompt(
+                "Source groups (comma-separated, blank to clear)",
+                default=current,
+            )
         except CancelAction:
             return
-        ctx.db.set_telegram_channel_source_group(ch.id, new_group)
+        ctx.db.set_telegram_channel_source_groups(
+            ch.id,
+            _parse_source_group_labels(new_group),
+        )
         console.print(_feedback("[ok]âœ”[/ok] Updated."))
         return
     if choice == "4":
@@ -2505,6 +2552,7 @@ def _manage_routes_v2(ctx: TuiContext) -> None:
 
     channels = {c.id: c for c in ctx.db.get_telegram_channels(active_only=False)}
     groups = {g.id: g for g in ctx.db.get_forwarding_groups(active_only=False)}
+    source_group_membership_map = ctx.db.get_source_group_membership_map(active_only=False)
 
     source_groups = _source_group_catalog(ctx, list(channels.values()))
     if source_groups:
@@ -2542,8 +2590,14 @@ def _manage_routes_v2(ctx: TuiContext) -> None:
                     if (
                         (channels.get(int(r["source_channel_db_id"])) is not None)
                         and (
-                            ((getattr(channels.get(int(r["source_channel_db_id"])), "source_group", None) or "").strip().lower())
-                            == target_group
+                            target_group
+                            in {
+                                name.lower()
+                                for name in source_group_membership_map.get(
+                                    int(r["source_channel_db_id"]),
+                                    [],
+                                )
+                            }
                         )
                     )
                 ]
@@ -2579,7 +2633,7 @@ def _manage_routes_v2(ctx: TuiContext) -> None:
             src.name if src else f"(source db_id={r['source_channel_db_id']})",
             str(r.get("destination_name") or f"dest-{r.get('destination_id')}"),
             _destination_type_human(str(r.get("destination_type") or "")),
-            (getattr(src, "source_group", None) or "-") if src else "-",
+            _channel_source_group_label(source_group_membership_map, src),
             group.name if group else "-",
             status,
         )

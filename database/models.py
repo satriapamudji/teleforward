@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from enum import Enum
 from typing import Optional
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     DateTime,
+    UniqueConstraint,
     event,
     text,
 )
@@ -53,6 +55,46 @@ class TelegramChannel(Base):
     route_mappings: Mapped[list["RouteMapping"]] = relationship(
         back_populates="source_channel", cascade="all, delete-orphan"
     )
+    source_group_memberships: Mapped[list["SourceGroupMembership"]] = relationship(
+        back_populates="channel", cascade="all, delete-orphan"
+    )
+
+
+class SourceGroup(Base):
+    __tablename__ = "source_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    memberships: Mapped[list["SourceGroupMembership"]] = relationship(
+        back_populates="source_group", cascade="all, delete-orphan"
+    )
+
+
+class SourceGroupMembership(Base):
+    __tablename__ = "source_group_memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_channel_id",
+            "source_group_id",
+            name="uq_source_group_membership_channel_group",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_channel_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_channels.id", ondelete="CASCADE"), index=True
+    )
+    source_group_id: Mapped[int] = mapped_column(
+        ForeignKey("source_groups.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    channel: Mapped["TelegramChannel"] = relationship(
+        back_populates="source_group_memberships"
+    )
+    source_group: Mapped["SourceGroup"] = relationship(back_populates="memberships")
 
 
 class DiscordWebhook(Base):
@@ -283,6 +325,7 @@ def init_db(database_path: Optional[str] = None):
     engine = get_engine(database_path=database_path)
     Base.metadata.create_all(engine)
     _ensure_schema_updates(engine)
+    _migrate_source_groups_to_memberships(engine)
     _sync_v2_from_v1(engine)
 
     if os.name == "posix":
@@ -313,6 +356,104 @@ def _ensure_schema_updates(engine) -> None:
         if "source_group" not in columns:
             conn.execute(
                 text("ALTER TABLE telegram_channels ADD COLUMN source_group VARCHAR(255)")
+            )
+
+
+def _migrate_source_groups_to_memberships(engine) -> None:
+    """Idempotent migration from legacy telegram_channels.source_group to memberships."""
+
+    with engine.begin() as conn:
+        required_tables = (
+            "telegram_channels",
+            "source_groups",
+            "source_group_memberships",
+        )
+        for table_name in required_tables:
+            exists = conn.execute(
+                text(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name=:name LIMIT 1"
+                ),
+                {"name": table_name},
+            ).scalar()
+            if not exists:
+                return
+
+        existing_group_names: dict[str, str] = {}
+        for row in conn.execute(text("SELECT name FROM source_groups")).mappings():
+            raw_name = str(row["name"]).strip()
+            if raw_name and raw_name.lower() not in existing_group_names:
+                existing_group_names[raw_name.lower()] = raw_name
+
+        def ensure_group(name: str) -> str:
+            clean = (name or "").strip()
+            if not clean:
+                return ""
+            existing = existing_group_names.get(clean.lower())
+            if existing:
+                return existing
+            conn.execute(
+                text("INSERT INTO source_groups (name, created_at) VALUES (:name, :created_at)"),
+                {"name": clean, "created_at": datetime.utcnow()},
+            )
+            existing_group_names[clean.lower()] = clean
+            return clean
+
+        # Backfill empty groups created in the previous registry-based implementation.
+        registry_row = conn.execute(
+            text("SELECT value FROM app_settings WHERE key=:key LIMIT 1"),
+            {"key": "source_channel_groups"},
+        ).mappings().first()
+        if registry_row and registry_row.get("value"):
+            try:
+                registry_values = json.loads(str(registry_row["value"]))
+            except Exception:
+                registry_values = []
+            if isinstance(registry_values, list):
+                for item in registry_values:
+                    ensure_group(str(item))
+
+        channel_rows = list(
+            conn.execute(
+                text(
+                    "SELECT id, source_group FROM telegram_channels "
+                    "WHERE source_group IS NOT NULL AND TRIM(source_group) <> ''"
+                )
+            ).mappings()
+        )
+        if not channel_rows:
+            return
+
+        group_id_by_key: dict[str, int] = {}
+        for row in conn.execute(text("SELECT id, name FROM source_groups")).mappings():
+            group_name = str(row["name"]).strip()
+            if group_name and group_name.lower() not in group_id_by_key:
+                group_id_by_key[group_name.lower()] = int(row["id"])
+
+        for row in channel_rows:
+            group_name = ensure_group(str(row["source_group"]))
+            if not group_name:
+                continue
+            group_id = group_id_by_key.get(group_name.lower())
+            if group_id is None:
+                group_id = int(
+                    conn.execute(
+                        text("SELECT id FROM source_groups WHERE name = :name LIMIT 1"),
+                        {"name": group_name},
+                    ).scalar()
+                )
+                group_id_by_key[group_name.lower()] = group_id
+            conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO source_group_memberships "
+                    "(source_channel_id, source_group_id, created_at) "
+                    "VALUES (:source_channel_id, :source_group_id, :created_at)"
+                ),
+                {
+                    "source_channel_id": int(row["id"]),
+                    "source_group_id": group_id,
+                    "created_at": datetime.utcnow(),
+                },
             )
 
 
