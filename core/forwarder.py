@@ -131,72 +131,14 @@ class Forwarder:
         *,
         source_label: Optional[str],
     ) -> str:
-        out = (text or "").strip()
-        key = self._telegram_source_key(source_label)
-
-        if key == "watcherguru":
-            out = re.sub(r"(?<![\w/])@WatcherGuru(?![\w])", "", out, flags=re.IGNORECASE)
-        elif key == "unfolded":
-            out = re.sub(
-                r"\s*\|\s*\[AI comment\]\((https?://[^\s)]+)\)",
-                "",
-                out,
-                flags=re.IGNORECASE,
-            )
-            out = re.sub(
-                r"\[AI comment\]\((https?://[^\s)]+)\)",
-                "",
-                out,
-                flags=re.IGNORECASE,
-            )
-            out = re.sub(
-                r"\[\s*[\-??]?\s*link\s*\]\((https?://[^\s)]+)\)",
-                r"[Read more](\1)",
-                out,
-                flags=re.IGNORECASE,
-            )
-            out = re.sub(r"\s+\|\s*$", "", out)
-        elif key == "infinityhedge" and re.search(r"(?i)\bThe Week Ahead:", out):
-            out = self._prettify_infinityhedge_weekly_digest(
-                out, source_label=source_label
-            )
-
-        out = re.sub(r"[ \t]+\n", "\n", out)
-        out = re.sub(r"\n{3,}", "\n\n", out)
-        return out.strip()
+        # Intentionally keep Telegram forwards as close to the original text as possible.
+        # We only move the source attribution to the footer in _build_telegram_text().
+        return (text or "").strip()
 
     def _telegram_body_to_html(self, text: str, *, source_label: Optional[str]) -> str:
-        raw = (text or "").strip()
-        placeholders: list[tuple[str, str]] = []
-        allow_md_links = self._telegram_source_key(source_label) in {
-            "unfolded",
-            "infinityhedge",
-        }
-
-        def _md_link_repl(match: re.Match[str]) -> str:
-            label = (match.group(1) or "").strip()
-            url = (match.group(2) or "").strip()
-            if not label or not url:
-                return match.group(0)
-            token = f"__TF_LINK_{len(placeholders)}__"
-            anchor = (
-                f'<a href="{html.escape(url, quote=True)}">'
-                f"{html.escape(label)}</a>"
-            )
-            placeholders.append((token, anchor))
-            return token
-
-        if allow_md_links:
-            raw = re.sub(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)", _md_link_repl, raw)
-            raw = re.sub(r"\s+\|\s+", " | ", raw)
-            raw = re.sub(r"\s+\|$", "", raw)
-        raw = re.sub(r"\n{3,}", "\n\n", raw).strip()
-
-        escaped = html.escape(raw)
-        escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
-        for token, anchor in placeholders:
-            escaped = escaped.replace(html.escape(token), anchor)
-        return escaped
+        # Escape body so we can safely use HTML parse mode only for the footer link.
+        _ = source_label  # kept for interface stability
+        return html.escape((text or "").strip())
 
     @staticmethod
     def _embed_color(key: str) -> int:
