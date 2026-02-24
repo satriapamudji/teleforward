@@ -2909,6 +2909,7 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
     while True:
         env_values = _load_env_values(ctx.env_path)
         env_session = env_values.get("TELEGRAM_SESSION_STRING")
+        env_bot_token = env_values.get("TELEGRAM_BOT_TOKEN")
         db_session = ctx.db.get_setting("telegram_session_string")
         effective_session = (
             ctx.config.telegram_session_string
@@ -2933,6 +2934,10 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
             _mask_secret(env_values.get("TELEGRAM_API_HASH")),
         )
         details.add_row(
+            "TELEGRAM_BOT_TOKEN (.env)",
+            _mask_secret(env_bot_token),
+        )
+        details.add_row(
             "TELEGRAM_SESSION_STRING (.env)",
             _mask_secret(env_session),
         )
@@ -2948,6 +2953,10 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
         )
         details.add_row("Effective session (this run)", _mask_secret(effective_session))
         details.add_row(
+            "Telegram destination sender (this run)",
+            "bot" if ctx.telegram_destination_sender.uses_bot else "user session",
+        )
+        details.add_row(
             "DATABASE_PATH (.env)", env_values.get("DATABASE_PATH", "(unset)")
         )
         details.add_row("DATA_DIR (.env)", env_values.get("DATA_DIR", "(unset)"))
@@ -2959,13 +2968,15 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
         actions.add_column("Action", style="white")
         actions.add_row("1", "Set TELEGRAM_API_ID in .env")
         actions.add_row("2", "Set TELEGRAM_API_HASH in .env")
-        actions.add_row("3", "Set TELEGRAM_SESSION_STRING manually in .env")
-        actions.add_row("4", "Export logged-in Telegram session to db + .env")
-        actions.add_row("5", "Set DATABASE_PATH in .env")
-        actions.add_row("6", "Set DATA_DIR in .env")
-        actions.add_row("7", "Set LOG_LEVEL in .env")
-        actions.add_row("8", "Clear TELEGRAM_SESSION_STRING from .env")
-        actions.add_row("9", "Clear DATABASE_PATH and DATA_DIR from .env")
+        actions.add_row("3", "Set TELEGRAM_BOT_TOKEN in .env")
+        actions.add_row("4", "Set TELEGRAM_SESSION_STRING manually in .env")
+        actions.add_row("5", "Export logged-in Telegram session to db + .env")
+        actions.add_row("6", "Set DATABASE_PATH in .env")
+        actions.add_row("7", "Set DATA_DIR in .env")
+        actions.add_row("8", "Set LOG_LEVEL in .env")
+        actions.add_row("9", "Clear TELEGRAM_BOT_TOKEN from .env")
+        actions.add_row("10", "Clear TELEGRAM_SESSION_STRING from .env")
+        actions.add_row("11", "Clear DATABASE_PATH and DATA_DIR from .env")
         actions.add_row("0", "Back")
         console.print(actions)
         console.print(
@@ -2976,7 +2987,7 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
         )
 
         try:
-            choice = _prompt("Settings action (0-9)", default="0")
+            choice = _prompt("Settings action (0-11)", default="0")
         except CancelAction:
             return
 
@@ -2996,6 +3007,18 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                 _set_env_value(ctx.env_path, "TELEGRAM_API_HASH", value)
                 console.print(_feedback("[ok]✔[/ok] Updated TELEGRAM_API_HASH in .env"))
             elif choice == "3":
+                value = _prompt("TELEGRAM_BOT_TOKEN")
+                if not value:
+                    console.print(_feedback("Value cannot be empty."))
+                    continue
+                _set_env_value(ctx.env_path, "TELEGRAM_BOT_TOKEN", value)
+                ctx.config.telegram_bot_token = value
+                await ctx.telegram_destination_sender.close()
+                ctx.telegram_destination_sender = _make_telegram_destination_sender(
+                    ctx.config
+                )
+                console.print(_feedback("Updated TELEGRAM_BOT_TOKEN in .env"))
+            elif choice == "4":
                 value = _prompt("TELEGRAM_SESSION_STRING")
                 if not value:
                     console.print(_feedback("[warn]⚠[/warn] Value cannot be empty."))
@@ -3004,7 +3027,7 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                 console.print(
                     _feedback("[ok]✔[/ok] Updated TELEGRAM_SESSION_STRING in .env")
                 )
-            elif choice == "4":
+            elif choice == "5":
                 ok = await _ensure_telegram_connected(ctx, interactive=True)
                 if not ok:
                     console.print(_feedback("[warn]⚠[/warn] Telegram login required."))
@@ -3022,27 +3045,35 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                 console.print(
                     _feedback("[ok]✔[/ok] Saved TELEGRAM_SESSION_STRING to db and .env")
                 )
-            elif choice == "5":
+            elif choice == "6":
                 value = _prompt("DATABASE_PATH (e.g. data/teleforward.db)")
                 _set_env_value(ctx.env_path, "DATABASE_PATH", value)
                 console.print(_feedback("[ok]✔[/ok] Updated DATABASE_PATH in .env"))
-            elif choice == "6":
+            elif choice == "7":
                 value = _prompt("DATA_DIR (e.g. data or /var/lib/teleforward)")
                 _set_env_value(ctx.env_path, "DATA_DIR", value)
                 console.print(_feedback("[ok]✔[/ok] Updated DATA_DIR in .env"))
-            elif choice == "7":
+            elif choice == "8":
                 value = _prompt("LOG_LEVEL", default="INFO").upper()
                 if value not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
                     console.print(_feedback("[warn]⚠[/warn] Invalid log level."))
                     continue
                 _set_env_value(ctx.env_path, "LOG_LEVEL", value)
                 console.print(_feedback("[ok]✔[/ok] Updated LOG_LEVEL in .env"))
-            elif choice == "8":
+            elif choice == "9":
+                _unset_env_value(ctx.env_path, "TELEGRAM_BOT_TOKEN")
+                ctx.config.telegram_bot_token = None
+                await ctx.telegram_destination_sender.close()
+                ctx.telegram_destination_sender = _make_telegram_destination_sender(
+                    ctx.config
+                )
+                console.print(_feedback("Cleared TELEGRAM_BOT_TOKEN from .env"))
+            elif choice == "10":
                 _unset_env_value(ctx.env_path, "TELEGRAM_SESSION_STRING")
                 console.print(
                     _feedback("[ok]✔[/ok] Cleared TELEGRAM_SESSION_STRING from .env")
                 )
-            elif choice == "9":
+            elif choice == "11":
                 _unset_env_value(ctx.env_path, "DATABASE_PATH")
                 _unset_env_value(ctx.env_path, "DATA_DIR")
                 console.print(
@@ -3149,17 +3180,17 @@ async def run_tui(config: Config, db: Database) -> None:
             left.add_row("5", "Add source channel")
             left.add_row("6", "Manage source channels")
             left.add_row("", "")
-            left.add_row(Text("Run", style="dim"), "")
-            left.add_row("12", "Run forwarder")
-            left.add_row("13", "Show recent logs")
+            left.add_row(Text("Destinations", style="dim"), "")
+            left.add_row("7", "List destinations")
+            left.add_row("8", "Add destination")
+            left.add_row("9", "Manage destinations")
+            left.add_row("10", "Create routes")
+            left.add_row("11", "Manage routes")
 
             right = _menu_grid()
-            right.add_row(Text("Destinations", style="dim"), "")
-            right.add_row("7", "List destinations")
-            right.add_row("8", "Add destination")
-            right.add_row("9", "Manage destinations")
-            right.add_row("10", "Create routes")
-            right.add_row("11", "Manage routes")
+            right.add_row(Text("Run", style="dim"), "")
+            right.add_row("12", "Run forwarder")
+            right.add_row("13", "Show recent logs")
             right.add_row("", "")
             right.add_row(Text("Tools", style="dim"), "")
             right.add_row("14", "Run setup wizard")
