@@ -3143,6 +3143,7 @@ async def _test_forward_last_message(ctx: TuiContext) -> None:
             sender_name=sender_name or src.name,
             text=transformed,
             telegram_link=telegram_link,
+            channel_username=src.username,
         )
         ok2, why = await forwarder.telegram_sender.send(  # type: ignore[attr-defined]
             telegram=ctx.telegram,

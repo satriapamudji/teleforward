@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import html
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Callable, Any
 from pathlib import Path
@@ -24,6 +25,28 @@ from database.models import TransformType, DestinationType
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TelegramSourceFormatProfile:
+    convert_markdown_links: bool = True
+    preserve_markdown_bold: bool = False
+    weekly_digest_spacing: bool = False
+    trailing_url_to_read_more: bool = False
+
+
+DEFAULT_TELEGRAM_SOURCE_FORMAT_PROFILE = TelegramSourceFormatProfile()
+
+# Config-driven per-source overrides keyed by normalized source identifier
+# (source label, channel username, or channel name after removing punctuation/spaces).
+TELEGRAM_SOURCE_FORMAT_PROFILES: dict[str, TelegramSourceFormatProfile] = {
+    "infinityhedge": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=False,
+        weekly_digest_spacing=True,
+        trailing_url_to_read_more=True,
+    ),
+}
 
 
 class Forwarder:
@@ -94,6 +117,22 @@ class Forwarder:
     def _telegram_source_key(source_label: Optional[str]) -> str:
         return re.sub(r"[^a-z0-9]+", "", (source_label or "").lower())
 
+    def _resolve_telegram_source_format_profile(
+        self,
+        *,
+        source_label: Optional[str],
+        channel_name: Optional[str],
+        channel_username: Optional[str],
+    ) -> TelegramSourceFormatProfile:
+        for candidate in (source_label, channel_username, channel_name):
+            key = self._telegram_source_key(candidate)
+            if not key:
+                continue
+            profile = TELEGRAM_SOURCE_FORMAT_PROFILES.get(key)
+            if profile is not None:
+                return profile
+        return DEFAULT_TELEGRAM_SOURCE_FORMAT_PROFILE
+
     @staticmethod
     def _prettify_infinityhedge_weekly_digest(
         text: str, *, source_label: Optional[str] = None
@@ -112,7 +151,12 @@ class Forwarder:
             r"\n\n\1: ",
             out,
         )
-        out = re.sub(r"\s+ICYMI:\s*", "\n\nICYMI:\n", out, flags=re.IGNORECASE)
+        out = re.sub(
+            r"\s+\*{0,2}\s*ICYMI:\s*\*{0,2}\s*",
+            "\n\nICYMI:\n",
+            out,
+            flags=re.IGNORECASE,
+        )
         out = re.sub(r"(?<!\*)\s+\*(?!\*)\s*(?=\S)", "\n- ", out)
         out = re.sub(r"(?m)^\*(?!\*)\s*(?=\S)", "- ", out)
         out = re.sub(r"[ \t]+\n", "\n", out)
@@ -130,15 +174,59 @@ class Forwarder:
         text: str,
         *,
         source_label: Optional[str],
+        profile: TelegramSourceFormatProfile,
     ) -> str:
-        # Intentionally keep Telegram forwards as close to the original text as possible.
-        # We only move the source attribution to the footer in _build_telegram_text().
-        return (text or "").strip()
+        out = (text or "").strip()
+        if profile.weekly_digest_spacing and re.search(r"(?i)\bThe Week Ahead:", out):
+            return self._prettify_infinityhedge_weekly_digest(
+                out, source_label=source_label
+            )
+        # Intentionally keep all other Telegram forwards as close to the original as possible.
+        return out
 
-    def _telegram_body_to_html(self, text: str, *, source_label: Optional[str]) -> str:
+    def _telegram_body_to_html(
+        self,
+        text: str,
+        *,
+        source_label: Optional[str],
+        profile: TelegramSourceFormatProfile,
+    ) -> str:
         # Escape body so we can safely use HTML parse mode only for the footer link.
         _ = source_label  # kept for interface stability
-        return html.escape((text or "").strip())
+        raw = (text or "").strip()
+        placeholders: list[tuple[str, str]] = []
+
+        def _md_link_repl(match: re.Match[str]) -> str:
+            label = (match.group(1) or "").strip()
+            url = (match.group(2) or "").strip()
+            if not label or not url:
+                return match.group(0)
+            token = f"__TF_LINK_{len(placeholders)}__"
+            placeholders.append(
+                (
+                    token,
+                    f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>',
+                )
+            )
+            return token
+
+        if profile.trailing_url_to_read_more:
+            raw = re.sub(
+                r"\s+(https?://[^\s]+)$",
+                r" [Read more](\1)",
+                raw,
+                count=1,
+            )
+
+        if profile.convert_markdown_links:
+            raw = re.sub(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)", _md_link_repl, raw)
+
+        escaped = html.escape(raw)
+        if profile.preserve_markdown_bold:
+            escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+        for token, anchor in placeholders:
+            escaped = escaped.replace(html.escape(token), anchor)
+        return escaped
 
     @staticmethod
     def _embed_color(key: str) -> int:
@@ -386,6 +474,7 @@ class Forwarder:
                 sender_name=resolved_sender,
                 text=transformed,
                 telegram_link=telegram_link,
+                channel_username=channel_username,
             )
 
             success, error = await self.telegram_sender.send(
@@ -472,13 +561,27 @@ class Forwarder:
         sender_name: str,
         text: str,
         telegram_link: Optional[str],
+        channel_username: Optional[str] = None,
     ) -> str:
         source_label, body = self._extract_leading_source_label(text)
-        body = self._apply_telegram_source_rules(body, source_label=source_label)
+        profile = self._resolve_telegram_source_format_profile(
+            source_label=source_label,
+            channel_name=channel_name,
+            channel_username=channel_username,
+        )
+        body = self._apply_telegram_source_rules(
+            body,
+            source_label=source_label,
+            profile=profile,
+        )
         if not body:
             body = "(no text)"
 
-        body_html = self._telegram_body_to_html(body, source_label=source_label)
+        body_html = self._telegram_body_to_html(
+            body,
+            source_label=source_label,
+            profile=profile,
+        )
         footer_html = None
         if source_label or sender_name or channel_name:
             if telegram_link and self.include_telegram_link:
