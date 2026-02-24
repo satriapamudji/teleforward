@@ -3151,6 +3151,7 @@ async def _test_forward_last_message(ctx: TuiContext) -> None:
                 text=outgoing_text,
                 file_path=media_path,
                 topic_id=selected_route.get("telegram_topic_id"),
+                parse_mode="html",
             ),
         )
     else:

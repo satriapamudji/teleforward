@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import html
 from datetime import datetime, timezone
 from typing import Optional, Callable, Any
 from pathlib import Path
@@ -78,6 +79,25 @@ class Forwarder:
         if self.allow_mass_mentions:
             parse.append("everyone")
         return {"parse": parse, "replied_user": False}
+
+    @staticmethod
+    def _extract_leading_source_label(text: str) -> tuple[Optional[str], str]:
+        cleaned = (text or "").strip()
+        match = re.match(r"^\[([^\]\n]{1,120})\]\s*(?:\n+|$)", cleaned)
+        if not match:
+            return None, cleaned
+        label = (match.group(1) or "").strip() or None
+        body = cleaned[match.end() :].strip()
+        return label, body
+
+    @staticmethod
+    def _strip_telegram_output_mentions(text: str) -> str:
+        # Strip plain social handles like "@WatcherGuru" while avoiding emails/URLs.
+        out = re.sub(r"(?<![\w/])@[A-Za-z0-9_]{2,}(?![\w])", "", text or "")
+        out = re.sub(r"[ \t]+\n", "\n", out)
+        out = re.sub(r"[ \t]{2,}", " ", out)
+        out = re.sub(r"\n{3,}", "\n\n", out)
+        return out.strip()
 
     @staticmethod
     def _embed_color(key: str) -> int:
@@ -334,6 +354,7 @@ class Forwarder:
                     text=outgoing_text,
                     file_path=media_path,
                     topic_id=route_info.get("telegram_topic_id"),
+                    parse_mode="html",
                 ),
             )
             await self._record_direct_result(
@@ -411,16 +432,42 @@ class Forwarder:
         text: str,
         telegram_link: Optional[str],
     ) -> str:
-        lines = [f"[{channel_name}]"]
-        if sender_name and sender_name != channel_name:
-            lines.append(sender_name)
-        lines.append(text.strip() if text.strip() else "(no text)")
-        if telegram_link and self.include_telegram_link:
-            lines.append(telegram_link)
-        out = "\n\n".join(line for line in lines if line)
-        if len(out) > 4096:
-            out = out[:4093] + "..."
-        return out
+        source_label, body = self._extract_leading_source_label(text)
+        body = self._strip_telegram_output_mentions(body)
+        if not body:
+            body = "(no text)"
+
+        footer_label = (
+            source_label
+            or (sender_name if sender_name and sender_name != channel_name else channel_name)
+            or channel_name
+        )
+
+        body_html = html.escape(body)
+        footer_html = None
+        if footer_label:
+            label_html = html.escape(footer_label)
+            if telegram_link and self.include_telegram_link:
+                footer_html = (
+                    f'[Source] <a href="{html.escape(telegram_link, quote=True)}">'
+                    f"{label_html}</a>"
+                )
+            else:
+                footer_html = f"[Source] {label_html}"
+
+        if footer_html:
+            separator = "\n\n"
+            max_len = 4096
+            budget = max_len - len(separator) - len(footer_html)
+            if budget < 1:
+                return footer_html[:4096]
+            if len(body_html) > budget:
+                body_html = body_html[: max(1, budget - 3)] + "..."
+            return f"{body_html}{separator}{footer_html}"
+
+        if len(body_html) > 4096:
+            body_html = body_html[:4093] + "..."
+        return body_html
 
     async def _record_direct_result(
         self,

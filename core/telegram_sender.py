@@ -15,6 +15,7 @@ class TelegramOutgoingMessage:
     text: str
     file_path: Optional[str] = None
     topic_id: Optional[int] = None
+    parse_mode: Optional[str] = None
 
 
 class TelegramDestinationSender:
@@ -113,6 +114,8 @@ class TelegramDestinationSender:
         kwargs = {"link_preview": False}
         if message.topic_id is not None:
             kwargs["reply_to"] = int(message.topic_id)
+        if message.parse_mode:
+            kwargs["parse_mode"] = message.parse_mode
 
         for attempt in range(self.max_retries + 1):
             try:
