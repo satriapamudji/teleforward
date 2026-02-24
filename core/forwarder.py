@@ -100,6 +100,12 @@ class Forwarder:
         return out.strip()
 
     @staticmethod
+    def _telegram_body_to_html(text: str) -> str:
+        escaped = html.escape(text or "")
+        # Preserve common Telegram/Markdown-style bold markers in forwarded text.
+        return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+
+    @staticmethod
     def _embed_color(key: str) -> int:
         seed = zlib.crc32(key.encode("utf-8"))
         hue = (seed % 360) / 360.0
@@ -437,23 +443,15 @@ class Forwarder:
         if not body:
             body = "(no text)"
 
-        footer_label = (
-            source_label
-            or (sender_name if sender_name and sender_name != channel_name else channel_name)
-            or channel_name
-        )
-
-        body_html = html.escape(body)
+        body_html = self._telegram_body_to_html(body)
         footer_html = None
-        if footer_label:
-            label_html = html.escape(footer_label)
+        if source_label or sender_name or channel_name:
             if telegram_link and self.include_telegram_link:
                 footer_html = (
-                    f'[Source] <a href="{html.escape(telegram_link, quote=True)}">'
-                    f"{label_html}</a>"
+                    f'<a href="{html.escape(telegram_link, quote=True)}">[Source]</a>'
                 )
             else:
-                footer_html = f"[Source] {label_html}"
+                footer_html = "[Source]"
 
         if footer_html:
             separator = "\n\n"
