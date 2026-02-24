@@ -499,6 +499,14 @@ class Forwarder:
         self._is_running = False
         if self.telegram:
             await self.telegram.stop()
+        sender_close = getattr(self.telegram_sender, "close", None)
+        if callable(sender_close):
+            try:
+                close_result = sender_close()
+                if asyncio.iscoroutine(close_result):
+                    await close_result
+            except Exception:
+                logger.exception("Failed to close Telegram destination sender")
         if self._dispatcher:
             await self._dispatcher.close()
             self._dispatcher = None

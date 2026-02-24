@@ -13,6 +13,7 @@ EDITABLE_ENV_KEYS = (
     "TELEGRAM_API_ID",
     "TELEGRAM_API_HASH",
     "TELEGRAM_SESSION_STRING",
+    "TELEGRAM_BOT_TOKEN",
     "DATABASE_PATH",
     "DATA_DIR",
     "LOG_LEVEL",
@@ -131,7 +132,11 @@ def _run_config_command(args: argparse.Namespace) -> None:
         print(f"ENV_PATH={_env_path()}")
         for key in EDITABLE_ENV_KEYS:
             value = values.get(key)
-            if key in {"TELEGRAM_API_HASH", "TELEGRAM_SESSION_STRING"}:
+            if key in {
+                "TELEGRAM_API_HASH",
+                "TELEGRAM_SESSION_STRING",
+                "TELEGRAM_BOT_TOKEN",
+            }:
                 shown = _mask_secret(value)
             else:
                 shown = value or "(unset)"

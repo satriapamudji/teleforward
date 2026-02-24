@@ -24,7 +24,11 @@ from rich.theme import Theme
 from config import Config
 from core.discord_sender import DiscordWebhookSender, discord_sender, DiscordMessage
 from core.forwarder import Forwarder
-from core.telegram_sender import TelegramOutgoingMessage, telegram_destination_sender
+from core.telegram_sender import (
+    TelegramDestinationSender,
+    TelegramOutgoingMessage,
+    telegram_destination_sender,
+)
 from core.telegram_client import TelegramClientWrapper, set_telegram_client
 from database.db import Database
 from database.models import DestinationType
@@ -276,7 +280,19 @@ class TuiContext:
     config: Config
     db: Database
     telegram: TelegramClientWrapper
+    telegram_destination_sender: TelegramDestinationSender
     env_path: Path
+
+
+def _make_telegram_destination_sender(config: Config) -> TelegramDestinationSender:
+    if not config.telegram_bot_token:
+        return telegram_destination_sender
+    return TelegramDestinationSender(
+        bot_api_id=config.telegram_api_id,
+        bot_api_hash=config.telegram_api_hash,
+        bot_token=config.telegram_bot_token,
+        data_dir=config.resolve_data_dir(),
+    )
 
 
 async def _ensure_telegram_connected(ctx: TuiContext, interactive: bool) -> bool:
@@ -748,17 +764,18 @@ async def _send_test_message(ctx: TuiContext) -> None:
             ),
         )
     elif destination_type == DestinationType.TELEGRAM_CHAT.value:
-        connected = await _ensure_telegram_connected(ctx, interactive=True)
-        if not connected:
-            console.print(_feedback("[warn]⚠[/warn] Telegram login required."))
-            return
+        if not ctx.telegram_destination_sender.uses_bot:
+            connected = await _ensure_telegram_connected(ctx, interactive=True)
+            if not connected:
+                console.print(_feedback("[warn]⚠[/warn] Telegram login required."))
+                return
         chat_id = destination.get("telegram_chat_id")
         if chat_id is None:
             console.print(
                 _feedback("[error]✘[/error] Destination is missing telegram_chat_id.")
             )
             return
-        ok, why = await telegram_destination_sender.send(
+        ok, why = await ctx.telegram_destination_sender.send(
             telegram=ctx.telegram,
             chat_id=int(chat_id),
             message=TelegramOutgoingMessage(
@@ -2405,6 +2422,7 @@ async def _run_forwarder(ctx: TuiContext) -> None:
     forwarder = Forwarder(
         db=ctx.db,
         telegram=ctx.telegram,
+        telegram_sender=ctx.telegram_destination_sender,
         allow_mass_mentions=ctx.config.discord_allow_mass_mentions,
         suppress_url_embeds=ctx.config.discord_suppress_url_embeds,
         strip_urls=ctx.config.discord_strip_urls,
@@ -2579,6 +2597,7 @@ async def _test_forward_last_message(ctx: TuiContext) -> None:
     forwarder = Forwarder(
         db=ctx.db,
         telegram=ctx.telegram,
+        telegram_sender=ctx.telegram_destination_sender,
         allow_mass_mentions=ctx.config.discord_allow_mass_mentions,
         suppress_url_embeds=ctx.config.discord_suppress_url_embeds,
         strip_urls=ctx.config.discord_strip_urls,
@@ -3057,6 +3076,7 @@ async def run_tui(config: Config, db: Database) -> None:
         config=config,
         db=db,
         telegram=telegram,
+        telegram_destination_sender=_make_telegram_destination_sender(config),
         env_path=Path.cwd() / ".env",
     )
 
@@ -3191,6 +3211,7 @@ async def run_tui(config: Config, db: Database) -> None:
 
             try:
                 if choice == "0":
+                    await ctx.telegram_destination_sender.close()
                     await ctx.telegram.stop()
                     return
                 if choice == "1":
@@ -3236,6 +3257,10 @@ async def run_tui(config: Config, db: Database) -> None:
         console.print(_feedback("[info]●[/info] Exiting…"))
     finally:
         try:
+            await ctx.telegram_destination_sender.close()
+        except Exception:
+            pass
+        try:
             await ctx.telegram.stop()
         except Exception:
             pass
@@ -3261,9 +3286,11 @@ async def run_headless(config: Config, db: Database) -> None:
     set_telegram_client(telegram)
 
     await telegram.start(phone=None)
+    telegram_sender = _make_telegram_destination_sender(config)
     forwarder = Forwarder(
         db=db,
         telegram=telegram,
+        telegram_sender=telegram_sender,
         allow_mass_mentions=config.discord_allow_mass_mentions,
         suppress_url_embeds=config.discord_suppress_url_embeds,
         strip_urls=config.discord_strip_urls,

@@ -13,6 +13,7 @@ class Config:
     telegram_api_id: int
     telegram_api_hash: str
     telegram_session_string: Optional[str] = None
+    telegram_bot_token: Optional[str] = None
     database_path: str = "data/teleforward.db"
     data_dir: Optional[str] = None
     log_level: str = "INFO"
@@ -34,11 +35,15 @@ class Config:
         session_string = os.getenv("TELEGRAM_SESSION_STRING")
         if session_string == "":
             session_string = None
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if bot_token == "":
+            bot_token = None
 
         return cls(
             telegram_api_id=int(api_id_str),
             telegram_api_hash=api_hash,
             telegram_session_string=session_string,
+            telegram_bot_token=bot_token,
             database_path=os.getenv("DATABASE_PATH", "data/teleforward.db"),
             data_dir=os.getenv("DATA_DIR") or None,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
