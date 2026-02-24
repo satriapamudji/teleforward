@@ -1,3 +1,4 @@
+import json
 from typing import Optional
 from sqlalchemy.orm import Session, sessionmaker
 from .models import (
@@ -85,8 +86,13 @@ class Database:
             }
 
     def add_telegram_channel(
-        self, channel_id: int, name: str, username: Optional[str] = None
+        self,
+        channel_id: int,
+        name: str,
+        username: Optional[str] = None,
+        source_group: Optional[str] = None,
     ) -> TelegramChannel:
+        source_group = (source_group or "").strip() or None
         with self._get_session() as session:
             existing = (
                 session.query(TelegramChannel).filter_by(channel_id=channel_id).first()
@@ -94,12 +100,17 @@ class Database:
             if existing:
                 existing.name = name
                 existing.username = username
+                if source_group is not None:
+                    existing.source_group = source_group
                 session.commit()
                 session.refresh(existing)
                 return existing
 
             channel = TelegramChannel(
-                channel_id=channel_id, name=name, username=username
+                channel_id=channel_id,
+                name=name,
+                username=username,
+                source_group=source_group,
             )
             session.add(channel)
             session.commit()
@@ -142,6 +153,7 @@ class Database:
         db_id: int,
         name: Optional[str] = None,
         username: Optional[str] = None,
+        source_group: Optional[str] = None,
     ) -> bool:
         with self._get_session() as session:
             channel = session.query(TelegramChannel).filter_by(id=db_id).first()
@@ -151,8 +163,141 @@ class Database:
                 channel.name = name
             if username is not None:
                 channel.username = username
+            if source_group is not None:
+                channel.source_group = (source_group or "").strip() or None
             session.commit()
             return True
+
+    def set_telegram_channel_source_group(
+        self, db_id: int, source_group: Optional[str]
+    ) -> bool:
+        with self._get_session() as session:
+            channel = session.query(TelegramChannel).filter_by(id=db_id).first()
+            if not channel:
+                return False
+            channel.source_group = (source_group or "").strip() or None
+            session.commit()
+            return True
+
+    _SOURCE_GROUPS_KEY = "source_channel_groups"
+
+    def get_source_group_registry(self) -> list[str]:
+        raw = self.get_setting(self._SOURCE_GROUPS_KEY, default="[]") or "[]"
+        try:
+            data = json.loads(raw)
+        except Exception:
+            data = []
+        names = {
+            str(x).strip()
+            for x in (data if isinstance(data, list) else [])
+            if str(x).strip()
+        }
+
+        # Also include any labels already assigned on channels.
+        with self._get_session() as session:
+            rows = (
+                session.query(TelegramChannel.source_group)
+                .filter(TelegramChannel.source_group.isnot(None))
+                .all()
+            )
+        for row in rows:
+            if row and row[0] is not None and str(row[0]).strip():
+                names.add(str(row[0]).strip())
+        return sorted(names, key=lambda s: s.lower())
+
+    def _save_source_group_registry(self, names: list[str]) -> None:
+        clean = sorted(
+            {str(x).strip() for x in names if str(x).strip()},
+            key=lambda s: s.lower(),
+        )
+        self.set_setting(self._SOURCE_GROUPS_KEY, json.dumps(clean))
+
+    def add_source_group_name(self, name: str) -> bool:
+        clean = (name or "").strip()
+        if not clean:
+            return False
+        names = self.get_source_group_registry()
+        if any(n.lower() == clean.lower() for n in names):
+            return False
+        names.append(clean)
+        self._save_source_group_registry(names)
+        return True
+
+    def rename_source_group_name(self, old_name: str, new_name: str) -> bool:
+        old_clean = (old_name or "").strip()
+        new_clean = (new_name or "").strip()
+        if not old_clean or not new_clean:
+            return False
+        names = self.get_source_group_registry()
+        if any(n.lower() == new_clean.lower() and n.lower() != old_clean.lower() for n in names):
+            return False
+
+        with self._get_session() as session:
+            channels = (
+                session.query(TelegramChannel)
+                .filter(TelegramChannel.source_group.isnot(None))
+                .all()
+            )
+            for channel in channels:
+                current = (channel.source_group or "").strip()
+                if current.lower() == old_clean.lower():
+                    channel.source_group = new_clean
+            session.commit()
+
+        updated_names = []
+        replaced = False
+        for n in names:
+            if n.lower() == old_clean.lower():
+                if not replaced:
+                    updated_names.append(new_clean)
+                    replaced = True
+            else:
+                updated_names.append(n)
+        if not replaced:
+            updated_names.append(new_clean)
+        self._save_source_group_registry(updated_names)
+        return True
+
+    def delete_source_group_name(
+        self, name: str, clear_channel_assignments: bool = False
+    ) -> bool:
+        clean = (name or "").strip()
+        if not clean:
+            return False
+
+        if clear_channel_assignments:
+            with self._get_session() as session:
+                channels = (
+                    session.query(TelegramChannel)
+                    .filter(TelegramChannel.source_group.isnot(None))
+                    .all()
+                )
+                changed = False
+                for channel in channels:
+                    current = (channel.source_group or "").strip()
+                    if current.lower() == clean.lower():
+                        channel.source_group = None
+                        changed = True
+                if changed:
+                    session.commit()
+
+        names = self.get_source_group_registry()
+        new_names = [n for n in names if n.lower() != clean.lower()]
+        self._save_source_group_registry(new_names)
+        return len(new_names) != len(names)
+
+    def get_source_group_members(
+        self, group_name: str, active_only: bool = False
+    ) -> list[TelegramChannel]:
+        target = (group_name or "").strip().lower()
+        if not target:
+            return []
+        channels = self.get_telegram_channels(active_only=active_only)
+        return [
+            ch
+            for ch in channels
+            if ((getattr(ch, "source_group", None) or "").strip().lower() == target)
+        ]
 
     def add_discord_webhook(self, name: str, url: str) -> DiscordWebhook:
         with self._get_session() as session:

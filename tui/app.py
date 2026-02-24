@@ -79,7 +79,7 @@ def _feedback(
 async def _read_home_choice_live(render_home: Callable[[str], Panel]) -> str:
     """Live-updating menu input for the home screen."""
     if not sys.stdin.isatty():
-        return Prompt.ask("Select (0-17, q=exit)", default="").strip()
+        return Prompt.ask("Select (0-18, q=exit)", default="").strip()
 
     if os.name == "nt":
         import msvcrt
@@ -353,6 +353,7 @@ def _print_channels(ctx: TuiContext) -> None:
     table.add_column("#", style="key", no_wrap=True, width=4)
     table.add_column("Name", style="heading", ratio=1, overflow="fold")
     table.add_column("Username", style="dim", ratio=1, overflow="fold")
+    table.add_column("Source Group", style="value", ratio=1, overflow="fold")
     table.add_column("Channel ID", style="value", overflow="ellipsis", max_width=18)
     table.add_column("Status", no_wrap=True)
     for i, ch in enumerate(channels, start=1):
@@ -365,6 +366,7 @@ def _print_channels(ctx: TuiContext) -> None:
             str(i),
             ch.name,
             f"@{ch.username}" if ch.username else "-",
+            getattr(ch, "source_group", None) or "-",
             str(ch.channel_id),
             status,
         )
@@ -643,13 +645,27 @@ async def _import_channels(ctx: TuiContext) -> None:
             else:
                 selected_ids.add(did)
 
+    try:
+        import_source_group = _prompt(
+            "Source group for imported channels (optional, blank for none)",
+            default="",
+        ).strip()
+    except CancelAction:
+        console.print(_feedback("[warn]âš [/warn] Canceled."))
+        return
+
     imported = 0
     selected = [dialogs_by_id[i] for i in selected_ids if i in dialogs_by_id]
     for d in selected:
         existing = ctx.db.get_telegram_channel(d["id"])
         if existing is None:
             imported += 1
-        ctx.db.add_telegram_channel(d["id"], d["name"], d.get("username"))
+        ctx.db.add_telegram_channel(
+            d["id"],
+            d["name"],
+            d.get("username"),
+            source_group=import_source_group or None,
+        )
 
     console.print(
         _feedback(
@@ -664,15 +680,287 @@ def _add_channel_manual(ctx: TuiContext) -> None:
         channel_id = _prompt_int("Source Telegram channel id (e.g. -1001234567890)")
         name = _prompt("Name")
         username = _prompt("Username (optional, without @)", default="")
+        source_group = _prompt("Source group (optional, e.g. crypto)", default="")
     except CancelAction:
         console.print(_feedback("[warn]⚠[/warn] Canceled."))
         return
     username = username or None
+    source_group = source_group.strip() or None
     if not name:
         console.print(_feedback("[warn]⚠[/warn] Name is required."))
         return
-    ctx.db.add_telegram_channel(channel_id, name, username)
+    ctx.db.add_telegram_channel(
+        channel_id, name, username, source_group=source_group
+    )
     console.print(_feedback("[ok]✔[/ok] Saved.", title="Telegram channel"))
+
+
+def _source_group_catalog(ctx: TuiContext, channels: list) -> list[tuple[str, list]]:
+    registry_names = ctx.db.get_source_group_registry()
+    display_by_key: dict[str, str] = {n.lower(): n for n in registry_names}
+    members_by_key: dict[str, list] = {n.lower(): [] for n in registry_names}
+
+    for ch in channels:
+        raw = (getattr(ch, "source_group", None) or "").strip()
+        if not raw:
+            continue
+        key = raw.lower()
+        display_by_key.setdefault(key, raw)
+        members_by_key.setdefault(key, []).append(ch)
+
+    return [
+        (display_by_key[key], members_by_key.get(key, []))
+        for key in sorted(display_by_key.keys())
+    ]
+
+
+def _select_route_sources(ctx: TuiContext, channels: list) -> list:
+    groups = _source_group_catalog(ctx, channels)
+    if groups:
+        group_table = Table(
+            title="Source groups",
+            box=box.SIMPLE_HEAD,
+            show_edge=False,
+            expand=True,
+        )
+        group_table.add_column("Key", style="key", no_wrap=True, width=4)
+        group_table.add_column("Group", style="heading", ratio=1, overflow="fold")
+        group_table.add_column("Sources", style="value", no_wrap=True)
+        group_table.add_row("0", "(select individual sources)", "-")
+        for i, (name, members) in enumerate(groups, start=1):
+            active_members = [m for m in members if getattr(m, "is_active", False)]
+            group_table.add_row(str(i), name, str(len(active_members)))
+        console.print(group_table)
+
+        while True:
+            raw = _prompt("Pick source group (0..N, default 0)", default="0")
+            try:
+                group_idx = int(raw)
+            except ValueError:
+                console.print(_feedback("Please enter a number."))
+                continue
+            if group_idx == 0:
+                break
+            if 1 <= group_idx <= len(groups):
+                selected = [
+                    ch for ch in groups[group_idx - 1][1] if getattr(ch, "is_active", False)
+                ]
+                if not selected:
+                    console.print(_feedback("That source group is empty."))
+                    continue
+                return selected
+            console.print(_feedback("Out of range."))
+
+    channel_table = Table(
+        title="Source Telegram channels",
+        box=box.SIMPLE_HEAD,
+        expand=True,
+        show_edge=False,
+    )
+    channel_table.add_column("#", style="key", no_wrap=True, width=4)
+    channel_table.add_column("Name", style="heading", ratio=1, overflow="fold")
+    channel_table.add_column("Source Group", style="value", ratio=1, overflow="fold")
+    channel_table.add_column(
+        "Channel ID", style="value", overflow="ellipsis", max_width=18
+    )
+    for i, ch in enumerate(channels, start=1):
+        channel_table.add_row(
+            str(i),
+            ch.name,
+            getattr(ch, "source_group", None) or "-",
+            str(ch.channel_id),
+        )
+    console.print(channel_table)
+
+    source_idxs = _choose_many_indexes(
+        "Select source channels (e.g. 1,2 | all | q=cancel)",
+        max_index=len(channels),
+    )
+    return [channels[i - 1] for i in source_idxs]
+
+
+def _manage_source_groups(ctx: TuiContext) -> None:
+    while True:
+        channels = ctx.db.get_telegram_channels(active_only=False)
+        groups = _source_group_catalog(ctx, channels)
+
+        table = Table(
+            title="Source groups",
+            box=box.SIMPLE_HEAD,
+            show_edge=False,
+            expand=True,
+        )
+        table.add_column("#", style="key", no_wrap=True, width=4)
+        table.add_column("Group", style="heading", ratio=1, overflow="fold")
+        table.add_column("Sources", style="value", no_wrap=True)
+        table.add_column("Active", style="value", no_wrap=True)
+        for i, (name, members) in enumerate(groups, start=1):
+            active_count = sum(1 for ch in members if getattr(ch, "is_active", False))
+            table.add_row(str(i), name, str(len(members)), str(active_count))
+        console.print(table)
+
+        actions = Table(title="Source Group Actions", box=box.SIMPLE, show_header=False)
+        actions.add_column("Key", style="key", no_wrap=True, width=4)
+        actions.add_column("Action", style="white")
+        actions.add_row("c", "Create source group")
+        actions.add_row("q", "Back")
+        console.print(actions)
+
+        try:
+            pick = _prompt("Group #, c=create, q=back", default="").strip().lower()
+        except CancelAction:
+            return
+        if pick in {"", "q", "back"}:
+            return
+        if pick in {"c", "create"}:
+            try:
+                new_name = _prompt("New source group name").strip()
+            except CancelAction:
+                continue
+            if not new_name:
+                console.print(_feedback("Group name is required."))
+                continue
+            if not ctx.db.add_source_group_name(new_name):
+                console.print(_feedback("Group already exists (or name invalid)."))
+                continue
+            console.print(_feedback("Source group created."))
+            continue
+
+        try:
+            idx = int(pick)
+        except ValueError:
+            console.print(_feedback("Enter a group number or c/q."))
+            continue
+        if idx < 1 or idx > len(groups):
+            console.print(_feedback("Out of range."))
+            continue
+
+        group_name, members = groups[idx - 1]
+        members_table = Table(
+            title=f"Source group: {group_name}",
+            box=box.SIMPLE_HEAD,
+            show_edge=False,
+            expand=True,
+        )
+        members_table.add_column("#", style="key", no_wrap=True, width=4)
+        members_table.add_column("Name", style="heading", ratio=1, overflow="fold")
+        members_table.add_column("Current Group", style="value", ratio=1, overflow="fold")
+        members_table.add_column("Channel ID", style="value", overflow="ellipsis", max_width=18)
+        for i, ch in enumerate(members, start=1):
+            members_table.add_row(
+                str(i),
+                ch.name,
+                getattr(ch, "source_group", None) or "-",
+                str(ch.channel_id),
+            )
+        console.print(members_table)
+
+        group_actions = Table(
+            title=f"Manage group '{group_name}'",
+            box=box.SIMPLE,
+            show_header=False,
+        )
+        group_actions.add_column("Key", style="key", no_wrap=True, width=4)
+        group_actions.add_column("Action", style="white")
+        group_actions.add_row("1", "Rename group")
+        group_actions.add_row("2", "Add/assign sources to this group")
+        group_actions.add_row("3", "Remove sources from this group")
+        group_actions.add_row("4", "Clear all sources from this group")
+        group_actions.add_row("5", "Delete group (clears memberships)")
+        group_actions.add_row("0", "Back")
+        console.print(group_actions)
+
+        try:
+            action = _prompt("Action (0-5)", default="0").strip()
+        except CancelAction:
+            continue
+
+        if action == "0":
+            continue
+        if action == "1":
+            try:
+                new_name = _prompt("New group name", default=group_name).strip()
+            except CancelAction:
+                continue
+            if not new_name:
+                console.print(_feedback("Group name is required."))
+                continue
+            if not ctx.db.rename_source_group_name(group_name, new_name):
+                console.print(_feedback("Rename failed (duplicate or invalid name)."))
+                continue
+            console.print(_feedback("Group renamed."))
+            continue
+        if action == "2":
+            if not channels:
+                console.print(_feedback("No source channels saved."))
+                continue
+            assign_table = Table(
+                title=f"Assign sources -> {group_name}",
+                box=box.SIMPLE_HEAD,
+                show_edge=False,
+                expand=True,
+            )
+            assign_table.add_column("#", style="key", no_wrap=True, width=4)
+            assign_table.add_column("Name", style="heading", ratio=1, overflow="fold")
+            assign_table.add_column("Current Group", style="value", ratio=1, overflow="fold")
+            assign_table.add_column("Channel ID", style="value", overflow="ellipsis", max_width=18)
+            for i, ch in enumerate(channels, start=1):
+                assign_table.add_row(
+                    str(i),
+                    ch.name,
+                    getattr(ch, "source_group", None) or "-",
+                    str(ch.channel_id),
+                )
+            console.print(assign_table)
+            try:
+                idxs = _choose_many_indexes(
+                    "Select channels to assign (e.g. 1,2 | all | q=cancel)",
+                    max_index=len(channels),
+                )
+            except CancelAction:
+                continue
+            for i in idxs:
+                ctx.db.set_telegram_channel_source_group(channels[i - 1].id, group_name)
+            console.print(_feedback("Sources assigned to group."))
+            continue
+        if action == "3":
+            if not members:
+                console.print(_feedback("Group has no sources."))
+                continue
+            try:
+                idxs = _choose_many_indexes(
+                    "Select members to remove (e.g. 1,2 | all | q=cancel)",
+                    max_index=len(members),
+                )
+            except CancelAction:
+                continue
+            for i in idxs:
+                ctx.db.set_telegram_channel_source_group(members[i - 1].id, None)
+            console.print(_feedback("Sources removed from group."))
+            continue
+        if action == "4":
+            try:
+                confirm = _prompt("Type 'clear' to clear all members", default="")
+            except CancelAction:
+                continue
+            if confirm != "clear":
+                console.print(_feedback("Canceled."))
+                continue
+            for ch in members:
+                ctx.db.set_telegram_channel_source_group(ch.id, None)
+            console.print(_feedback("Group memberships cleared."))
+            continue
+        if action == "5":
+            try:
+                confirm = _prompt("Type 'delete' to delete group and clear memberships", default="")
+            except CancelAction:
+                continue
+            if confirm != "delete":
+                console.print(_feedback("Canceled."))
+                continue
+            ctx.db.delete_source_group_name(group_name, clear_channel_assignments=True)
+            console.print(_feedback("Group deleted."))
+            continue
 
 
 async def _add_webhook(ctx: TuiContext) -> None:
@@ -836,12 +1124,13 @@ def _manage_channels(ctx: TuiContext) -> None:
     actions.add_column("Action", style="white")
     actions.add_row("1", "Toggle active/disabled")
     actions.add_row("2", "Rename / update username")
-    actions.add_row("3", "Delete channel (and its mappings/logs)")
+    actions.add_row("3", "Set source group")
+    actions.add_row("4", "Delete channel (and its mappings/logs)")
     actions.add_row("0", "Back")
     console.print(actions)
 
     try:
-        choice = _prompt("Action (0-3)", default="0")
+        choice = _prompt("Action (0-4)", default="0")
     except CancelAction:
         return
 
@@ -870,6 +1159,15 @@ def _manage_channels(ctx: TuiContext) -> None:
         console.print(_feedback("[ok]✔[/ok] Updated."))
         return
     if choice == "3":
+        try:
+            current = getattr(ch, "source_group", None) or ""
+            new_group = _prompt("Source group (blank to clear)", default=current)
+        except CancelAction:
+            return
+        ctx.db.set_telegram_channel_source_group(ch.id, new_group)
+        console.print(_feedback("[ok]âœ”[/ok] Updated."))
+        return
+    if choice == "4":
         try:
             confirm = _prompt("Type 'delete' to confirm", default="")
         except CancelAction:
@@ -1734,30 +2032,11 @@ def _create_routes_v2(ctx: TuiContext) -> None:
         )
         return
 
-    channel_table = Table(
-        title="Source Telegram channels",
-        box=box.SIMPLE_HEAD,
-        expand=True,
-        show_edge=False,
-    )
-    channel_table.add_column("#", style="key", no_wrap=True, width=4)
-    channel_table.add_column("Name", style="heading", ratio=1, overflow="fold")
-    channel_table.add_column(
-        "Channel ID", style="value", overflow="ellipsis", max_width=18
-    )
-    for i, ch in enumerate(channels, start=1):
-        channel_table.add_row(str(i), ch.name, str(ch.channel_id))
-    console.print(channel_table)
-
     try:
-        source_idxs = _choose_many_indexes(
-            "Select source channels (e.g. 1,2 | all | q=cancel)",
-            max_index=len(channels),
-        )
+        selected_sources = _select_route_sources(ctx, channels)
     except CancelAction:
-        console.print(_feedback("[warn]⚠[/warn] Canceled."))
+        console.print(_feedback("[warn]???[/warn] Canceled."))
         return
-    selected_sources = [channels[i - 1] for i in source_idxs]
 
     dest_table = Table(
         title="Destination",
@@ -2227,6 +2506,53 @@ def _manage_routes_v2(ctx: TuiContext) -> None:
     channels = {c.id: c for c in ctx.db.get_telegram_channels(active_only=False)}
     groups = {g.id: g for g in ctx.db.get_forwarding_groups(active_only=False)}
 
+    source_groups = _source_group_catalog(ctx, list(channels.values()))
+    if source_groups:
+        filter_table = Table(
+            title="Filter by source group (optional)",
+            box=box.SIMPLE_HEAD,
+            show_edge=False,
+            expand=True,
+        )
+        filter_table.add_column("Key", style="key", no_wrap=True, width=4)
+        filter_table.add_column("Source Group", style="heading", ratio=1, overflow="fold")
+        filter_table.add_column("Sources", style="value", no_wrap=True)
+        filter_table.add_row("0", "(all routes)", "-")
+        for i, (name, members) in enumerate(source_groups, start=1):
+            filter_table.add_row(str(i), name, str(len(members)))
+        console.print(filter_table)
+
+        while True:
+            try:
+                raw_filter = _prompt("Source group filter (0..N, default 0)", default="0")
+            except CancelAction:
+                return
+            try:
+                filter_idx = int(raw_filter)
+            except ValueError:
+                console.print(_feedback("[warn]???[/warn] Please enter a number."))
+                continue
+            if filter_idx == 0:
+                break
+            if 1 <= filter_idx <= len(source_groups):
+                target_group = source_groups[filter_idx - 1][0].lower()
+                route_rows = [
+                    r
+                    for r in route_rows
+                    if (
+                        (channels.get(int(r["source_channel_db_id"])) is not None)
+                        and (
+                            ((getattr(channels.get(int(r["source_channel_db_id"])), "source_group", None) or "").strip().lower())
+                            == target_group
+                        )
+                    )
+                ]
+                if not route_rows:
+                    console.print(_feedback("[warn]???[/warn] No routes found for that source group."))
+                    return
+                break
+            console.print(_feedback("[warn]???[/warn] Out of range."))
+
     route_table = Table(
         title="Manage routes",
         box=box.SIMPLE_HEAD,
@@ -2237,6 +2563,7 @@ def _manage_routes_v2(ctx: TuiContext) -> None:
     route_table.add_column("Source", style="heading", ratio=1, overflow="fold")
     route_table.add_column("Destination", style="heading", ratio=1, overflow="fold")
     route_table.add_column("Type", style="dim", no_wrap=True)
+    route_table.add_column("Src Group", style="value", ratio=1, overflow="fold")
     route_table.add_column("Group", style="value", ratio=1, overflow="fold")
     route_table.add_column("Status", no_wrap=True)
     for i, r in enumerate(route_rows, start=1):
@@ -2252,6 +2579,7 @@ def _manage_routes_v2(ctx: TuiContext) -> None:
             src.name if src else f"(source db_id={r['source_channel_db_id']})",
             str(r.get("destination_name") or f"dest-{r.get('destination_id')}"),
             _destination_type_human(str(r.get("destination_type") or "")),
+            (getattr(src, "source_group", None) or "-") if src else "-",
             group.name if group else "-",
             status,
         )
@@ -3197,6 +3525,7 @@ async def run_tui(config: Config, db: Database) -> None:
             right.add_row("15", "Send test message")
             right.add_row("16", "Test forward latest")
             right.add_row("17", "Settings")
+            right.add_row("18", "Manage source groups")
             right.add_row("0", "Exit")
 
             def _render_home(typed: str = "") -> Panel:
@@ -3221,7 +3550,7 @@ async def run_tui(config: Config, db: Database) -> None:
                     menu_content = Group(left, Text(""), right)
 
                 input_hint = Text.from_markup(
-                    f"[key]Select[/key] [dim](0-17, q=exit)[/dim]: [value]{typed}[/value]"
+                    f"[key]Select[/key] [dim](0-18, q=exit)[/dim]: [value]{typed}[/value]"
                 )
                 home_width = min(120, max(24, terminal_width - 4))
                 return Panel(
@@ -3279,6 +3608,8 @@ async def run_tui(config: Config, db: Database) -> None:
                     await _test_forward_last_message(ctx)
                 elif choice == "17":
                     await _manage_runtime_settings(ctx)
+                elif choice == "18":
+                    _manage_source_groups(ctx)
                 else:
                     console.print(_feedback("[warn]⚠[/warn] Unknown option."))
             except CancelAction:

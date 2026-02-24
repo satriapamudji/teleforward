@@ -43,6 +43,7 @@ class TelegramChannel(Base):
     channel_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    source_group: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -281,6 +282,7 @@ def get_engine(database_path: Optional[str] = None):
 def init_db(database_path: Optional[str] = None):
     engine = get_engine(database_path=database_path)
     Base.metadata.create_all(engine)
+    _ensure_schema_updates(engine)
     _sync_v2_from_v1(engine)
 
     if os.name == "posix":
@@ -291,6 +293,27 @@ def init_db(database_path: Optional[str] = None):
         except OSError:
             pass
     return engine
+
+
+def _ensure_schema_updates(engine) -> None:
+    with engine.begin() as conn:
+        has_table = conn.execute(
+            text(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='telegram_channels' LIMIT 1"
+            )
+        ).scalar()
+        if not has_table:
+            return
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute(text("PRAGMA table_info(telegram_channels)")).mappings()
+        }
+        if "source_group" not in columns:
+            conn.execute(
+                text("ALTER TABLE telegram_channels ADD COLUMN source_group VARCHAR(255)")
+            )
 
 
 def _sync_v2_from_v1(engine) -> None:
