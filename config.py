@@ -37,6 +37,7 @@ class Config:
     discord_suppress_url_embeds: bool = True
     discord_strip_urls: bool = False
     discord_include_telegram_link: bool = True
+    telegram_format_audit_path: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -54,6 +55,9 @@ class Config:
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         if bot_token == "":
             bot_token = None
+        telegram_format_audit_path = os.getenv("TELEGRAM_FORMAT_AUDIT_PATH")
+        if telegram_format_audit_path == "":
+            telegram_format_audit_path = None
 
         return cls(
             telegram_api_id=int(api_id_str),
@@ -77,6 +81,7 @@ class Config:
                 "DISCORD_INCLUDE_TELEGRAM_LINK", "true"
             ).lower()
             == "true",
+            telegram_format_audit_path=telegram_format_audit_path,
         )
 
     def resolve_data_dir(self) -> Path:

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import html
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Callable, Any
@@ -84,6 +85,7 @@ class Forwarder:
         suppress_url_embeds: bool = True,
         strip_urls: bool = False,
         include_telegram_link: bool = True,
+        telegram_format_audit_path: Optional[str] = None,
     ):
         self.db = db
         self.telegram = telegram
@@ -93,11 +95,17 @@ class Forwarder:
         self.suppress_url_embeds = suppress_url_embeds
         self.strip_urls = strip_urls
         self.include_telegram_link = include_telegram_link
+        self.telegram_format_audit_path = (
+            Path(telegram_format_audit_path)
+            if telegram_format_audit_path and telegram_format_audit_path.strip()
+            else None
+        )
         self._is_running = False
         self._channel_webhook_map: dict[int, list[dict]] = {}
         self._channel_transformer_map: dict[int, MessageTransformer] = {}
         self._on_forward_callback: Optional[Callable[[dict], Any]] = None
         self._dispatcher: Optional[DiscordSendDispatcher] = None
+        self._telegram_audit_lock = asyncio.Lock()
 
     def _neutralize_mass_mentions(self, text: str) -> str:
         if self.allow_mass_mentions:
@@ -156,6 +164,21 @@ class Forwarder:
             if profile is not None:
                 return profile
         return DEFAULT_TELEGRAM_SOURCE_FORMAT_PROFILE
+
+    def _resolve_telegram_source_profile_key(
+        self,
+        *,
+        source_label: Optional[str],
+        channel_name: Optional[str],
+        channel_username: Optional[str],
+    ) -> Optional[str]:
+        for candidate in (source_label, channel_username, channel_name):
+            key = self._telegram_source_key(candidate)
+            if not key:
+                continue
+            if key in TELEGRAM_SOURCE_FORMAT_PROFILES:
+                return key
+        return None
 
     @staticmethod
     def _prettify_infinityhedge_weekly_digest(
@@ -600,6 +623,20 @@ class Forwarder:
                     parse_mode="html",
                 ),
             )
+            await self._record_telegram_format_audit(
+                route_info=route_info,
+                source_channel_id=chat_id,
+                source_channel_name=channel_name,
+                source_channel_username=channel_username,
+                sender_name=resolved_sender,
+                message_id=message.id,
+                raw_text=transform_result.original_text,
+                transformed_text=transform_result.transformed_text,
+                final_text=outgoing_text,
+                has_media=media_path is not None,
+                success=success,
+                error=error,
+            )
             await self._record_direct_result(
                 route_info=route_info,
                 source_channel_id=chat_id,
@@ -718,6 +755,93 @@ class Forwarder:
         if len(body_html) > 4096:
             body_html = body_html[:4093] + "..."
         return body_html
+
+    async def _record_telegram_format_audit(
+        self,
+        *,
+        route_info: dict,
+        source_channel_id: int,
+        source_channel_name: str,
+        source_channel_username: Optional[str],
+        sender_name: str,
+        message_id: int,
+        raw_text: Optional[str],
+        transformed_text: Optional[str],
+        final_text: str,
+        has_media: bool,
+        success: bool,
+        error: Optional[str],
+    ) -> None:
+        audit_path = self.telegram_format_audit_path
+        if audit_path is None:
+            return
+
+        source_label, _ = self._extract_leading_source_label(transformed_text or "")
+        profile_key = self._resolve_telegram_source_profile_key(
+            source_label=source_label,
+            channel_name=source_channel_name,
+            channel_username=source_channel_username,
+        )
+        profile = self._resolve_telegram_source_format_profile(
+            source_label=source_label,
+            channel_name=source_channel_name,
+            channel_username=source_channel_username,
+        )
+
+        record = {
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "kind": "telegram_destination_send",
+            "source": {
+                "channel_id": source_channel_id,
+                "channel_name": source_channel_name,
+                "channel_username": source_channel_username,
+                "sender_name": sender_name,
+                "message_id": message_id,
+                "source_label": source_label,
+            },
+            "destination": {
+                "destination_name": route_info.get("destination_name"),
+                "chat_id": route_info.get("telegram_chat_id"),
+                "topic_id": route_info.get("telegram_topic_id"),
+            },
+            "format_profile": {
+                "matched_key": profile_key,
+                "convert_markdown_links": profile.convert_markdown_links,
+                "preserve_markdown_bold": profile.preserve_markdown_bold,
+                "weekly_digest_spacing": profile.weekly_digest_spacing,
+                "trailing_url_to_read_more": profile.trailing_url_to_read_more,
+                "strip_leading_alert_emoji": profile.strip_leading_alert_emoji,
+                "strip_markettwits_max_promo": profile.strip_markettwits_max_promo,
+                "strip_trailing_source_handle": profile.strip_trailing_source_handle,
+            },
+            "payload": {
+                "raw_text": raw_text,
+                "transformed_text": transformed_text,
+                "final_text_html": final_text,
+                "parse_mode": "html",
+                "has_media": has_media,
+            },
+            "result": {
+                "success": success,
+                "error": error,
+            },
+        }
+
+        async with self._telegram_audit_lock:
+            try:
+                await asyncio.to_thread(
+                    self._append_jsonl_record,
+                    audit_path,
+                    record,
+                )
+            except Exception:
+                logger.exception("Failed to write Telegram format audit log")
+
+    @staticmethod
+    def _append_jsonl_record(path: Path, record: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     async def _record_direct_result(
         self,

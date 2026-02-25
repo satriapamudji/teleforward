@@ -2808,6 +2808,7 @@ async def _run_forwarder(ctx: TuiContext) -> None:
         suppress_url_embeds=ctx.config.discord_suppress_url_embeds,
         strip_urls=ctx.config.discord_strip_urls,
         include_telegram_link=ctx.config.discord_include_telegram_link,
+        telegram_format_audit_path=ctx.config.telegram_format_audit_path,
     )
 
     def on_forward(event: dict):
@@ -2983,6 +2984,7 @@ async def _test_forward_last_message(ctx: TuiContext) -> None:
         suppress_url_embeds=ctx.config.discord_suppress_url_embeds,
         strip_urls=ctx.config.discord_strip_urls,
         include_telegram_link=ctx.config.discord_include_telegram_link,
+        telegram_format_audit_path=ctx.config.telegram_format_audit_path,
     )
 
     forwarder.reload_mappings()
@@ -3712,6 +3714,7 @@ async def run_headless(config: Config, db: Database) -> None:
         suppress_url_embeds=config.discord_suppress_url_embeds,
         strip_urls=config.discord_strip_urls,
         include_telegram_link=config.discord_include_telegram_link,
+        telegram_format_audit_path=config.telegram_format_audit_path,
     )
 
     def on_forward(event: dict):
