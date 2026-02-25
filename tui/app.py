@@ -3295,6 +3295,7 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
         env_values = _load_env_values(ctx.env_path)
         env_session = env_values.get("TELEGRAM_SESSION_STRING")
         env_bot_token = env_values.get("TELEGRAM_BOT_TOKEN")
+        env_telegram_format_audit_path = env_values.get("TELEGRAM_FORMAT_AUDIT_PATH")
         db_session = ctx.db.get_setting("telegram_session_string")
         effective_session = (
             ctx.config.telegram_session_string
@@ -3321,6 +3322,10 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
         details.add_row(
             "TELEGRAM_BOT_TOKEN (env file)",
             _mask_secret(env_bot_token),
+        )
+        details.add_row(
+            "TELEGRAM_FORMAT_AUDIT_PATH (env file)",
+            env_telegram_format_audit_path or "(unset)",
         )
         details.add_row(
             "TELEGRAM_SESSION_STRING (env file)",
@@ -3362,6 +3367,8 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
         actions.add_row("9", "Clear TELEGRAM_BOT_TOKEN from env file")
         actions.add_row("10", "Clear TELEGRAM_SESSION_STRING from env file")
         actions.add_row("11", "Clear DATABASE_PATH and DATA_DIR from env file")
+        actions.add_row("12", "Set TELEGRAM_FORMAT_AUDIT_PATH in env file")
+        actions.add_row("13", "Clear TELEGRAM_FORMAT_AUDIT_PATH from env file")
         actions.add_row("0", "Back")
         console.print(actions)
         console.print(
@@ -3372,7 +3379,7 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
         )
 
         try:
-            choice = _prompt("Settings action (0-11)", default="0")
+            choice = _prompt("Settings action (0-13)", default="0")
         except CancelAction:
             return
 
@@ -3463,6 +3470,26 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                 _unset_env_value(ctx.env_path, "DATA_DIR")
                 console.print(
                     _feedback("[ok]✔[/ok] Cleared DATABASE_PATH and DATA_DIR from env file")
+                )
+            elif choice == "12":
+                value = _prompt(
+                    "TELEGRAM_FORMAT_AUDIT_PATH (e.g. /opt/teleforward/data/telegram-format-audit.jsonl)"
+                )
+                if not value:
+                    console.print(_feedback("Value cannot be empty."))
+                    continue
+                _set_env_value(ctx.env_path, "TELEGRAM_FORMAT_AUDIT_PATH", value)
+                ctx.config.telegram_format_audit_path = value
+                console.print(
+                    _feedback("Updated TELEGRAM_FORMAT_AUDIT_PATH in env file")
+                )
+            elif choice == "13":
+                _unset_env_value(ctx.env_path, "TELEGRAM_FORMAT_AUDIT_PATH")
+                ctx.config.telegram_format_audit_path = None
+                console.print(
+                    _feedback(
+                        "Cleared TELEGRAM_FORMAT_AUDIT_PATH from env file"
+                    )
                 )
             else:
                 console.print(_feedback("[warn]⚠[/warn] Unknown option."))
