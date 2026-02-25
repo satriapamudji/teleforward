@@ -3,15 +3,16 @@ import warnings
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
+from env_paths import resolve_env_file_path
 
 
 def _load_local_dotenv_safely() -> None:
-    dotenv_path = find_dotenv(usecwd=True)
-    if not dotenv_path:
+    dotenv_path = resolve_env_file_path()
+    if not dotenv_path.exists():
         return
     try:
-        load_dotenv(dotenv_path=dotenv_path)
+        load_dotenv(dotenv_path=str(dotenv_path))
     except PermissionError:
         warnings.warn(
             f"Skipping unreadable dotenv file: {dotenv_path}",

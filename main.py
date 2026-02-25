@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import dotenv_values, set_key, unset_key
+from env_paths import resolve_env_file_path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -25,7 +26,7 @@ EDITABLE_ENV_KEYS = (
 
 
 def _env_path() -> Path:
-    return Path.cwd() / ".env"
+    return resolve_env_file_path()
 
 
 def _mask_secret(value: Optional[str], keep_start: int = 8, keep_end: int = 6) -> str:
@@ -94,20 +95,20 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "If TELEGRAM_SESSION_STRING is only in database settings, "
-            "write it to .env."
+            "write it to the selected env file."
         ),
     )
 
-    config_parser = sub.add_parser("config", help="Manage .env settings")
+    config_parser = sub.add_parser("config", help="Manage env-file settings")
     config_sub = config_parser.add_subparsers(dest="config_cmd")
 
-    config_sub.add_parser("show", help="Show editable .env keys")
+    config_sub.add_parser("show", help="Show editable env-file keys")
 
-    config_set = config_sub.add_parser("set", help="Set a key in .env")
+    config_set = config_sub.add_parser("set", help="Set a key in the env file")
     config_set.add_argument("key", choices=EDITABLE_ENV_KEYS)
     config_set.add_argument("value")
 
-    config_unset = config_sub.add_parser("unset", help="Remove a key from .env")
+    config_unset = config_sub.add_parser("unset", help="Remove a key from the env file")
     config_unset.add_argument("key", choices=EDITABLE_ENV_KEYS)
 
     migrate_parser = sub.add_parser(
@@ -239,7 +240,7 @@ def main():
         print("\nPlease set the following environment variables:")
         print("  TELEGRAM_API_ID=your_api_id")
         print("  TELEGRAM_API_HASH=your_api_hash")
-        print("\nYou can manage .env from CLI:")
+        print("\nYou can manage the env file from CLI:")
         print("  teleforward config show")
         print("  teleforward config set TELEGRAM_API_ID 12345")
         print("  teleforward config set TELEGRAM_API_HASH your_hash")
@@ -284,11 +285,11 @@ def main():
         if getattr(args, "sync_session_to_env", False):
             if config.telegram_session_string is None and session_from_db:
                 _set_env_value("TELEGRAM_SESSION_STRING", session_from_db)
-                print("Synced TELEGRAM_SESSION_STRING from database to .env")
+                print("Synced TELEGRAM_SESSION_STRING from database to env file")
             elif config.telegram_session_string is not None:
-                print("Skipped sync: TELEGRAM_SESSION_STRING already set in .env")
+                print("Skipped sync: TELEGRAM_SESSION_STRING already set in env file")
             else:
-                print("Skipped sync: no TELEGRAM_SESSION_STRING found in db or .env")
+                print("Skipped sync: no TELEGRAM_SESSION_STRING found in db or env file")
 
         if not session_string:
             warnings.append(

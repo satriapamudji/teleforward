@@ -22,6 +22,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from config import Config
+from env_paths import resolve_env_file_path
 from core.discord_sender import DiscordWebhookSender, discord_sender, DiscordMessage
 from core.forwarder import Forwarder
 from core.telegram_sender import (
@@ -3311,18 +3312,18 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
         details.add_column("Value", style="value", ratio=1, overflow="fold")
         details.add_row("ENV file", str(ctx.env_path.resolve()))
         details.add_row(
-            "TELEGRAM_API_ID (.env)", env_values.get("TELEGRAM_API_ID", "(unset)")
+            "TELEGRAM_API_ID (env file)", env_values.get("TELEGRAM_API_ID", "(unset)")
         )
         details.add_row(
-            "TELEGRAM_API_HASH (.env)",
+            "TELEGRAM_API_HASH (env file)",
             _mask_secret(env_values.get("TELEGRAM_API_HASH")),
         )
         details.add_row(
-            "TELEGRAM_BOT_TOKEN (.env)",
+            "TELEGRAM_BOT_TOKEN (env file)",
             _mask_secret(env_bot_token),
         )
         details.add_row(
-            "TELEGRAM_SESSION_STRING (.env)",
+            "TELEGRAM_SESSION_STRING (env file)",
             _mask_secret(env_session),
         )
         details.add_row(
@@ -3341,31 +3342,31 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
             "bot" if ctx.telegram_destination_sender.uses_bot else "user session",
         )
         details.add_row(
-            "DATABASE_PATH (.env)", env_values.get("DATABASE_PATH", "(unset)")
+            "DATABASE_PATH (env file)", env_values.get("DATABASE_PATH", "(unset)")
         )
-        details.add_row("DATA_DIR (.env)", env_values.get("DATA_DIR", "(unset)"))
-        details.add_row("LOG_LEVEL (.env)", env_values.get("LOG_LEVEL", "(unset)"))
+        details.add_row("DATA_DIR (env file)", env_values.get("DATA_DIR", "(unset)"))
+        details.add_row("LOG_LEVEL (env file)", env_values.get("LOG_LEVEL", "(unset)"))
         console.print(details)
 
         actions = Table(title="Settings Actions", box=box.SIMPLE, show_header=False)
         actions.add_column("Key", style="key", no_wrap=True, width=4)
         actions.add_column("Action", style="white")
-        actions.add_row("1", "Set TELEGRAM_API_ID in .env")
-        actions.add_row("2", "Set TELEGRAM_API_HASH in .env")
-        actions.add_row("3", "Set TELEGRAM_BOT_TOKEN in .env")
-        actions.add_row("4", "Set TELEGRAM_SESSION_STRING manually in .env")
-        actions.add_row("5", "Export logged-in Telegram session to db + .env")
-        actions.add_row("6", "Set DATABASE_PATH in .env")
-        actions.add_row("7", "Set DATA_DIR in .env")
-        actions.add_row("8", "Set LOG_LEVEL in .env")
-        actions.add_row("9", "Clear TELEGRAM_BOT_TOKEN from .env")
-        actions.add_row("10", "Clear TELEGRAM_SESSION_STRING from .env")
-        actions.add_row("11", "Clear DATABASE_PATH and DATA_DIR from .env")
+        actions.add_row("1", "Set TELEGRAM_API_ID in env file")
+        actions.add_row("2", "Set TELEGRAM_API_HASH in env file")
+        actions.add_row("3", "Set TELEGRAM_BOT_TOKEN in env file")
+        actions.add_row("4", "Set TELEGRAM_SESSION_STRING manually in env file")
+        actions.add_row("5", "Export logged-in Telegram session to db + env file")
+        actions.add_row("6", "Set DATABASE_PATH in env file")
+        actions.add_row("7", "Set DATA_DIR in env file")
+        actions.add_row("8", "Set LOG_LEVEL in env file")
+        actions.add_row("9", "Clear TELEGRAM_BOT_TOKEN from env file")
+        actions.add_row("10", "Clear TELEGRAM_SESSION_STRING from env file")
+        actions.add_row("11", "Clear DATABASE_PATH and DATA_DIR from env file")
         actions.add_row("0", "Back")
         console.print(actions)
         console.print(
             _feedback(
-                "[info]●[/info] Changes to .env apply on next process start. "
+                "[info]●[/info] Changes to the env file apply on next process start. "
                 "Database path changes require restart."
             )
         )
@@ -3382,14 +3383,14 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                 value = _prompt("TELEGRAM_API_ID")
                 int(value)
                 _set_env_value(ctx.env_path, "TELEGRAM_API_ID", value)
-                console.print(_feedback("[ok]✔[/ok] Updated TELEGRAM_API_ID in .env"))
+                console.print(_feedback("[ok]✔[/ok] Updated TELEGRAM_API_ID in env file"))
             elif choice == "2":
                 value = _prompt("TELEGRAM_API_HASH")
                 if not value:
                     console.print(_feedback("[warn]⚠[/warn] Value cannot be empty."))
                     continue
                 _set_env_value(ctx.env_path, "TELEGRAM_API_HASH", value)
-                console.print(_feedback("[ok]✔[/ok] Updated TELEGRAM_API_HASH in .env"))
+                console.print(_feedback("[ok]✔[/ok] Updated TELEGRAM_API_HASH in env file"))
             elif choice == "3":
                 value = _prompt("TELEGRAM_BOT_TOKEN")
                 if not value:
@@ -3401,7 +3402,7 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                 ctx.telegram_destination_sender = _make_telegram_destination_sender(
                     ctx.config
                 )
-                console.print(_feedback("Updated TELEGRAM_BOT_TOKEN in .env"))
+                console.print(_feedback("Updated TELEGRAM_BOT_TOKEN in env file"))
             elif choice == "4":
                 value = _prompt("TELEGRAM_SESSION_STRING")
                 if not value:
@@ -3409,7 +3410,7 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                     continue
                 _set_env_value(ctx.env_path, "TELEGRAM_SESSION_STRING", value)
                 console.print(
-                    _feedback("[ok]✔[/ok] Updated TELEGRAM_SESSION_STRING in .env")
+                    _feedback("[ok]✔[/ok] Updated TELEGRAM_SESSION_STRING in env file")
                 )
             elif choice == "5":
                 ok = await _ensure_telegram_connected(ctx, interactive=True)
@@ -3427,23 +3428,23 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                 ctx.db.set_setting("telegram_session_string", session)
                 _set_env_value(ctx.env_path, "TELEGRAM_SESSION_STRING", session)
                 console.print(
-                    _feedback("[ok]✔[/ok] Saved TELEGRAM_SESSION_STRING to db and .env")
+                    _feedback("[ok]✔[/ok] Saved TELEGRAM_SESSION_STRING to db and env file")
                 )
             elif choice == "6":
                 value = _prompt("DATABASE_PATH (e.g. data/teleforward.db)")
                 _set_env_value(ctx.env_path, "DATABASE_PATH", value)
-                console.print(_feedback("[ok]✔[/ok] Updated DATABASE_PATH in .env"))
+                console.print(_feedback("[ok]✔[/ok] Updated DATABASE_PATH in env file"))
             elif choice == "7":
                 value = _prompt("DATA_DIR (e.g. data or /var/lib/teleforward)")
                 _set_env_value(ctx.env_path, "DATA_DIR", value)
-                console.print(_feedback("[ok]✔[/ok] Updated DATA_DIR in .env"))
+                console.print(_feedback("[ok]✔[/ok] Updated DATA_DIR in env file"))
             elif choice == "8":
                 value = _prompt("LOG_LEVEL", default="INFO").upper()
                 if value not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
                     console.print(_feedback("[warn]⚠[/warn] Invalid log level."))
                     continue
                 _set_env_value(ctx.env_path, "LOG_LEVEL", value)
-                console.print(_feedback("[ok]✔[/ok] Updated LOG_LEVEL in .env"))
+                console.print(_feedback("[ok]✔[/ok] Updated LOG_LEVEL in env file"))
             elif choice == "9":
                 _unset_env_value(ctx.env_path, "TELEGRAM_BOT_TOKEN")
                 ctx.config.telegram_bot_token = None
@@ -3451,17 +3452,17 @@ async def _manage_runtime_settings(ctx: TuiContext) -> None:
                 ctx.telegram_destination_sender = _make_telegram_destination_sender(
                     ctx.config
                 )
-                console.print(_feedback("Cleared TELEGRAM_BOT_TOKEN from .env"))
+                console.print(_feedback("Cleared TELEGRAM_BOT_TOKEN from env file"))
             elif choice == "10":
                 _unset_env_value(ctx.env_path, "TELEGRAM_SESSION_STRING")
                 console.print(
-                    _feedback("[ok]✔[/ok] Cleared TELEGRAM_SESSION_STRING from .env")
+                    _feedback("[ok]✔[/ok] Cleared TELEGRAM_SESSION_STRING from env file")
                 )
             elif choice == "11":
                 _unset_env_value(ctx.env_path, "DATABASE_PATH")
                 _unset_env_value(ctx.env_path, "DATA_DIR")
                 console.print(
-                    _feedback("[ok]✔[/ok] Cleared DATABASE_PATH and DATA_DIR from .env")
+                    _feedback("[ok]✔[/ok] Cleared DATABASE_PATH and DATA_DIR from env file")
                 )
             else:
                 console.print(_feedback("[warn]⚠[/warn] Unknown option."))
@@ -3492,7 +3493,7 @@ async def run_tui(config: Config, db: Database) -> None:
         db=db,
         telegram=telegram,
         telegram_destination_sender=_make_telegram_destination_sender(config),
-        env_path=Path.cwd() / ".env",
+        env_path=resolve_env_file_path(),
     )
 
     def is_first_run() -> bool:
