@@ -35,6 +35,7 @@ class TelegramSourceFormatProfile:
     trailing_url_to_read_more: bool = False
     strip_leading_alert_emoji: bool = False
     strip_markettwits_max_promo: bool = False
+    strip_trailing_source_handle: bool = False
 
 
 DEFAULT_TELEGRAM_SOURCE_FORMAT_PROFILE = TelegramSourceFormatProfile()
@@ -61,6 +62,13 @@ TELEGRAM_SOURCE_FORMAT_PROFILES: dict[str, TelegramSourceFormatProfile] = {
         trailing_url_to_read_more=False,
         strip_leading_alert_emoji=True,
         strip_markettwits_max_promo=True,
+    ),
+    "finwatch": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=False,
+        weekly_digest_spacing=False,
+        trailing_url_to_read_more=False,
+        strip_trailing_source_handle=True,
     ),
 }
 
@@ -191,7 +199,7 @@ class Forwarder:
         if not out:
             return out
         out = re.sub(
-            r"^\s*(?:(?:[❗‼⚠🚨🔴🟡🔔])(?:\uFE0F)?\s*)+",
+            r"^\s*(?:(?:[\u2757\u203c\u26a0\U0001F6A8\U0001F534\U0001F7E1\U0001F514])(?:\uFE0F)?\s*)+",
             "",
             out,
         )
@@ -207,7 +215,7 @@ class Forwarder:
         # "__mt в max__ (https://max.ru/markettwits)"
         out = re.sub(
             r"(?:\s*(?:For more details,\s*visit\s+)?)"
-            r"(?:__)?mt\s+в\s+max(?:__)?\s*"
+            r"(?:__)?mt\s+[\u0432v]\s+max(?:__)?\s*"
             r"\(https?://max\.ru/markettwits/?\)\.?\s*$",
             "",
             out,
@@ -225,11 +233,32 @@ class Forwarder:
         out = re.sub(r"\n{3,}", "\n\n", out)
         return out.strip()
 
+    @staticmethod
+    def _strip_trailing_source_handle(
+        text: str,
+        *,
+        channel_username: Optional[str],
+    ) -> str:
+        out = (text or "").strip()
+        if not out or not channel_username:
+            return out
+        username = channel_username.strip().lstrip("@")
+        if not username:
+            return out
+        out = re.sub(
+            rf"\s+@{re.escape(username)}\b[.!,:;]?\s*$",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+        return out.strip()
+
     def _apply_telegram_source_rules(
         self,
         text: str,
         *,
         source_label: Optional[str],
+        channel_username: Optional[str],
         profile: TelegramSourceFormatProfile,
     ) -> str:
         out = (text or "").strip()
@@ -238,6 +267,10 @@ class Forwarder:
         out = self._strip_leading_alert_emoji(out)
         if profile.strip_markettwits_max_promo:
             out = self._strip_markettwits_max_promo(out)
+        if profile.strip_trailing_source_handle:
+            out = self._strip_trailing_source_handle(
+                out, channel_username=channel_username
+            )
         if profile.weekly_digest_spacing and re.search(r"(?i)\bThe Week Ahead:", out):
             out = self._prettify_infinityhedge_weekly_digest(
                 out, source_label=source_label
@@ -633,6 +666,7 @@ class Forwarder:
         body = self._apply_telegram_source_rules(
             body,
             source_label=source_label,
+            channel_username=channel_username,
             profile=profile,
         )
         if not body:
