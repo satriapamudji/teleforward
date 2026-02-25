@@ -37,10 +37,12 @@ It is designed for VPS use (systemd included) and day-to-day operation via a Ric
 ## What you get
 
 - Telegram (user session) -> Discord/Telegram destinations
+- Optional Telegram destination sending via bot token (`TELEGRAM_BOT_TOKEN`) while keeping Telegram source reads on the user session
 - Multiple routing patterns:
   - many Telegram channels -> one destination
   - one Telegram channel -> many destinations
   - mixed fanout (Discord + Telegram)
+- Source groups (many-to-many): a source can belong to multiple groups for route-creation convenience
 - Messages stay separate (no batching), sent via a queue with retries
 - Discord embeds:
   - per-channel accent color
@@ -126,7 +128,7 @@ Commands:
 teleforward tui      # interactive setup + tools
 teleforward run      # headless forwarder (VPS)
 teleforward doctor   # config sanity checks
-teleforward config   # manage local .env values
+teleforward config   # manage selected env-file values (prefers /etc/teleforward/teleforward.env on Linux if present)
 teleforward migrate verify-v2  # verify legacy v1 rows are mirrored into v2
 ```
 
@@ -141,11 +143,17 @@ sudo journalctl -u teleforward -f
 
 Set these in `.env` (local) or `/etc/teleforward/teleforward.env` (VPS).
 
+Env-file path behavior (runtime + TUI + CLI settings editor):
+- `TELEFORWARD_ENV_FILE` (if set) takes priority
+- Otherwise, on Linux, `/etc/teleforward/teleforward.env` is used when it exists
+- Otherwise, TeleForward falls back to local `./.env`
+
 | Variable | Required | Default | Notes |
 |---|---:|---|---|
 | `TELEGRAM_API_ID` | yes | - | From `my.telegram.org` |
 | `TELEGRAM_API_HASH` | yes | - | From `my.telegram.org` |
 | `TELEGRAM_SESSION_STRING` | VPS | - | Recommended for headless runs |
+| `TELEGRAM_BOT_TOKEN` | no | - | If set, Telegram destination sends use the bot (source reads still use the user session) |
 | `DATA_DIR` | VPS | (derived) | For hardened systemd: `/var/lib/teleforward` |
 | `DATABASE_PATH` | VPS | `data/teleforward.db` | For hardened systemd: `/var/lib/teleforward/teleforward.db` |
 | `LOG_LEVEL` | no | `INFO` | |
@@ -161,6 +169,7 @@ Set these in `.env` (local) or `/etc/teleforward/teleforward.env` (VPS).
 
 - Prefer storing `TELEGRAM_SESSION_STRING` in a secret manager on VPS.
 - Keep `/etc/teleforward/teleforward.env` mode `600` and owned by the service user.
+- If you use TUI/CLI settings on VPS, run them as the service user (or root carefully), since they now target the active env file and may write secrets there.
 - Webhook URLs are validated to Discord domains and HTTPS to reduce SSRF risk.
 - Webhook tokens are redacted from errors/diagnostics and HTTP request logging is suppressed by default.
 - If you previously committed `.env` (or pasted webhook URLs/session strings) to GitHub:
