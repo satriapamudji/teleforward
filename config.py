@@ -1,11 +1,26 @@
 import os
+import warnings
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
 
-load_dotenv()
+def _load_local_dotenv_safely() -> None:
+    dotenv_path = find_dotenv(usecwd=True)
+    if not dotenv_path:
+        return
+    try:
+        load_dotenv(dotenv_path=dotenv_path)
+    except PermissionError:
+        warnings.warn(
+            f"Skipping unreadable dotenv file: {dotenv_path}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
+_load_local_dotenv_safely()
 
 
 @dataclass
