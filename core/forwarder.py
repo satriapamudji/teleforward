@@ -40,6 +40,12 @@ DEFAULT_TELEGRAM_SOURCE_FORMAT_PROFILE = TelegramSourceFormatProfile()
 # Config-driven per-source overrides keyed by normalized source identifier
 # (source label, channel username, or channel name after removing punctuation/spaces).
 TELEGRAM_SOURCE_FORMAT_PROFILES: dict[str, TelegramSourceFormatProfile] = {
+    "watcherguru": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=True,
+        weekly_digest_spacing=False,
+        trailing_url_to_read_more=False,
+    ),
     "infinityhedge": TelegramSourceFormatProfile(
         convert_markdown_links=True,
         preserve_markdown_bold=False,
