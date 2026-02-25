@@ -33,6 +33,8 @@ class TelegramSourceFormatProfile:
     preserve_markdown_bold: bool = False
     weekly_digest_spacing: bool = False
     trailing_url_to_read_more: bool = False
+    strip_leading_alert_emoji: bool = False
+    strip_markettwits_max_promo: bool = False
 
 
 DEFAULT_TELEGRAM_SOURCE_FORMAT_PROFILE = TelegramSourceFormatProfile()
@@ -51,6 +53,14 @@ TELEGRAM_SOURCE_FORMAT_PROFILES: dict[str, TelegramSourceFormatProfile] = {
         preserve_markdown_bold=False,
         weekly_digest_spacing=True,
         trailing_url_to_read_more=True,
+    ),
+    "marketsalpha": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=False,
+        weekly_digest_spacing=False,
+        trailing_url_to_read_more=False,
+        strip_leading_alert_emoji=True,
+        strip_markettwits_max_promo=True,
     ),
 }
 
@@ -175,6 +185,46 @@ class Forwarder:
         )
         return out.strip()
 
+    @staticmethod
+    def _strip_leading_alert_emoji(text: str) -> str:
+        out = (text or "").strip()
+        if not out:
+            return out
+        out = re.sub(
+            r"^\s*(?:(?:[❗‼⚠🚨🔴🟡🔔])(?:\uFE0F)?\s*)+",
+            "",
+            out,
+        )
+        return out.strip()
+
+    @staticmethod
+    def _strip_markettwits_max_promo(text: str) -> str:
+        out = (text or "").strip()
+        if not out:
+            return out
+
+        # marketsAlpha often appends a terminal promo fragment like:
+        # "__mt в max__ (https://max.ru/markettwits)"
+        out = re.sub(
+            r"(?:\s*(?:For more details,\s*visit\s+)?)"
+            r"(?:__)?mt\s+в\s+max(?:__)?\s*"
+            r"\(https?://max\.ru/markettwits/?\)\.?\s*$",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+
+        # If a lead-in survives after promo removal, trim it as well.
+        out = re.sub(
+            r"(?:[.]\s*)?For more details,\s*visit\s*$",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"[ \t]+\n", "\n", out)
+        out = re.sub(r"\n{3,}", "\n\n", out)
+        return out.strip()
+
     def _apply_telegram_source_rules(
         self,
         text: str,
@@ -183,8 +233,12 @@ class Forwarder:
         profile: TelegramSourceFormatProfile,
     ) -> str:
         out = (text or "").strip()
+        if profile.strip_leading_alert_emoji:
+            out = self._strip_leading_alert_emoji(out)
+        if profile.strip_markettwits_max_promo:
+            out = self._strip_markettwits_max_promo(out)
         if profile.weekly_digest_spacing and re.search(r"(?i)\bThe Week Ahead:", out):
-            return self._prettify_infinityhedge_weekly_digest(
+            out = self._prettify_infinityhedge_weekly_digest(
                 out, source_label=source_label
             )
         # Intentionally keep all other Telegram forwards as close to the original as possible.
