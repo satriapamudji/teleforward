@@ -16,7 +16,7 @@ from rich import box
 from rich.align import Align
 from rich.live import Live
 from rich.panel import Panel
-from rich.prompt import Prompt, IntPrompt
+from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
@@ -211,17 +211,15 @@ def _prompt(prompt: str, default: Optional[str] = None) -> str:
 def _prompt_int(prompt: str) -> int:
     while True:
         try:
-            raw = IntPrompt.ask(prompt)
+            raw = Prompt.ask(prompt).strip()
         except KeyboardInterrupt:
             raise
-        except Exception:
-            console.print(_feedback("[warn]⚠[/warn] Please enter a valid integer."))
-            continue
+        if raw.lower() in {"q", "quit", "cancel"}:
+            raise CancelAction()
         try:
             return int(raw)
         except ValueError:
-            console.print(_feedback("[warn]⚠[/warn] Please enter a valid integer."))
-
+            console.print(_feedback("[warn]?[/warn] Please enter a valid integer."))
 
 def _choose_index(prompt: str, max_index: int) -> int:
     while True:

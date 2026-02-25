@@ -252,10 +252,16 @@ def main():
     db = Database(database_path=config.database_path)
 
     if cmd == "tui":
-        asyncio.run(run_tui(config=config, db=db))
+        try:
+            asyncio.run(run_tui(config=config, db=db))
+        except KeyboardInterrupt:
+            print("\nExiting.")
         return
     if cmd == "run":
-        asyncio.run(run_headless(config=config, db=db))
+        try:
+            asyncio.run(run_headless(config=config, db=db))
+        except KeyboardInterrupt:
+            print("\nStopped.")
         return
     if cmd == "doctor":
         from core.discord_sender import DiscordWebhookSender
