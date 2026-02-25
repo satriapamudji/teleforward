@@ -22,5 +22,5 @@ dependencies = [
 teleforward = "main:main"
 
 [tool.setuptools]
-py-modules = ["main", "config"]
+py-modules = ["main", "config", "env_paths"]
 packages = ["core", "database", "tui"]
