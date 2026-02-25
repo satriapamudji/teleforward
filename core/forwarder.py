@@ -233,8 +233,9 @@ class Forwarder:
         profile: TelegramSourceFormatProfile,
     ) -> str:
         out = (text or "").strip()
-        if profile.strip_leading_alert_emoji:
-            out = self._strip_leading_alert_emoji(out)
+        # Apply this globally across Telegram sources to reduce noisy alert prefixes
+        # while preserving the rest of the message body.
+        out = self._strip_leading_alert_emoji(out)
         if profile.strip_markettwits_max_promo:
             out = self._strip_markettwits_max_promo(out)
         if profile.weekly_digest_spacing and re.search(r"(?i)\bThe Week Ahead:", out):
