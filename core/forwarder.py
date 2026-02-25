@@ -199,7 +199,7 @@ class Forwarder:
         if not out:
             return out
         out = re.sub(
-            r"^\s*(?:(?:[\u2757\u203c\u26a0\U0001F6A8\U0001F534\U0001F7E1\U0001F514])(?:\uFE0F)?\s*)+",
+            "^\\s*(?:(?:[\u2757\u203c\u26a0\U0001F6A8\U0001F534\U0001F7E1\U0001F514])(?:\uFE0F)?\\s*)+",
             "",
             out,
         )
@@ -214,9 +214,9 @@ class Forwarder:
         # marketsAlpha often appends a terminal promo fragment like:
         # "__mt в max__ (https://max.ru/markettwits)"
         out = re.sub(
-            r"(?:\s*(?:For more details,\s*visit\s+)?)"
-            r"(?:__)?mt\s+[\u0432v]\s+max(?:__)?\s*"
-            r"\(https?://max\.ru/markettwits/?\)\.?\s*$",
+            "(?:\\s*(?:For more details,\\s*visit\\s+)?)"
+            + "(?:__)?mt\\s+[\u0432v]\\s+max(?:__)?\\s*"
+            + "\\(https?://max\\.ru/markettwits/?\\)\\.?\\s*$",
             "",
             out,
             flags=re.IGNORECASE,
