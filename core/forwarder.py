@@ -199,7 +199,9 @@ class Forwarder:
         if not out:
             return out
         out = re.sub(
-            "^\\s*(?:(?:[\u2757\u203c\u26a0\U0001F6A8\U0001F534\U0001F7E1\U0001F514])(?:\uFE0F)?\\s*)+",
+            "^[\\s\\u200b\\u200c\\u200d\\ufeff]*"
+            "(?:(?:[\u2757\u203c\u26a0\U0001F6A8\U0001F534\U0001F7E1\U0001F514])(?:\uFE0F)?"
+            "[\\s\\u200b\\u200c\\u200d\\ufeff]*)+",
             "",
             out,
         )
@@ -217,6 +219,23 @@ class Forwarder:
             "(?:\\s*(?:For more details,\\s*visit\\s+)?)"
             + "(?:__)?mt\\s+[\u0432v]\\s+max(?:__)?\\s*"
             + "\\(https?://max\\.ru/markettwits/?\\)\\.?\\s*$",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+
+        # Fallback for format variants: any terminal mt... + max.ru/markettwits promo.
+        out = re.sub(
+            "(?:\\s*(?:For more details,\\s*visit\\s+)?)?"
+            + "(?:__)?mt\\b[^\\n()]{0,80}\\(https?://max\\.ru/markettwits/?\\)\\.?\\s*$",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+
+        # Last-resort source-specific cleanup if only the URL wrapper remains.
+        out = re.sub(
+            "\\s*(?:[|:.,;-]\\s*)?(?:__)?[^\\n()]{0,80}\\(https?://max\\.ru/markettwits/?\\)\\.?\\s*$",
             "",
             out,
             flags=re.IGNORECASE,
