@@ -166,8 +166,11 @@ class MessageTransformer:
                 current_text = current_text + rule.replacement
                 result.matched_rules.append(f"suffix:{rule.replacement}")
 
-        # Clean up extra whitespace
-        current_text = re.sub(r"\s+", " ", current_text).strip()
+        # Preserve line breaks for readability while normalizing repeated spaces.
+        current_text = current_text.replace("\r\n", "\n").replace("\r", "\n")
+        current_text = re.sub(r"[ \t]+", " ", current_text)
+        current_text = re.sub(r" *\n *", "\n", current_text)
+        current_text = re.sub(r"\n{3,}", "\n\n", current_text).strip()
 
         result.transformed_text = current_text
         return result

@@ -35,8 +35,10 @@ class TelegramSourceFormatProfile:
     weekly_digest_spacing: bool = False
     trailing_url_to_read_more: bool = False
     strip_leading_alert_emoji: bool = False
+    strip_leading_decor_emoji: bool = False
     strip_markettwits_max_promo: bool = False
     strip_trailing_source_handle: bool = False
+    strip_any_trailing_handle: bool = False
 
 
 DEFAULT_TELEGRAM_SOURCE_FORMAT_PROFILE = TelegramSourceFormatProfile()
@@ -49,6 +51,7 @@ TELEGRAM_SOURCE_FORMAT_PROFILES: dict[str, TelegramSourceFormatProfile] = {
         preserve_markdown_bold=True,
         weekly_digest_spacing=False,
         trailing_url_to_read_more=False,
+        strip_trailing_source_handle=True,
     ),
     "infinityhedge": TelegramSourceFormatProfile(
         convert_markdown_links=True,
@@ -58,18 +61,28 @@ TELEGRAM_SOURCE_FORMAT_PROFILES: dict[str, TelegramSourceFormatProfile] = {
     ),
     "marketsalpha": TelegramSourceFormatProfile(
         convert_markdown_links=True,
-        preserve_markdown_bold=False,
+        preserve_markdown_bold=True,
         weekly_digest_spacing=False,
         trailing_url_to_read_more=False,
         strip_leading_alert_emoji=True,
+        strip_leading_decor_emoji=True,
         strip_markettwits_max_promo=True,
     ),
     "finwatch": TelegramSourceFormatProfile(
         convert_markdown_links=True,
-        preserve_markdown_bold=False,
+        preserve_markdown_bold=True,
         weekly_digest_spacing=False,
         trailing_url_to_read_more=False,
-        strip_trailing_source_handle=True,
+        strip_leading_decor_emoji=True,
+        strip_any_trailing_handle=True,
+    ),
+    "unfolded": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=True,
+    ),
+    "shoalwire": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=True,
     ),
 }
 
@@ -231,10 +244,54 @@ class Forwarder:
         return out.strip()
 
     @staticmethod
+    def _strip_leading_decor_emoji(text: str) -> str:
+        out = (text or "").strip()
+        if not out:
+            return out
+        out = re.sub(
+            "^[\\s\\u200b\\u200c\\u200d\\ufeff]*"
+            "(?:"
+            "(?:[\u2600-\u27BF])(?:\uFE0F)?"
+            "|(?:[\U0001F300-\U0001FAFF])"
+            "|(?:[\U0001F1E6-\U0001F1FF])"
+            "|(?:\uFE0F)"
+            "|(?:[\u200b\u200c\u200d\ufeff])"
+            "|(?:\\s)"
+            "){1,8}",
+            "",
+            out,
+        )
+        return out.strip()
+
+    @staticmethod
     def _strip_markettwits_max_promo(text: str) -> str:
         out = (text or "").strip()
         if not out:
             return out
+
+        # Remove any inline/terminal markdown promo links to max.ru/markettwits.
+        out = re.sub(
+            r"\s*\[(?:__)?mt[^\]\n]{0,60}(?:__)?\]\(https?://max\.ru/markettwits/?\)\.?",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+
+        # Plain URL variant can also appear inline.
+        out = re.sub(
+            r"\s*(?:__)?mt[^\n()]{0,60}(?:__)?\s*\(https?://max\.ru/markettwits/?\)\.?",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+
+        out = re.sub(
+            r"(?:\s*(?:For more (?:details|information),\s*visit\s+)?)?"
+            r"\[(?:__)?mt[^\]\n]{0,60}(?:__)?\]\(https?://max\.ru/markettwits/?\)\.?\s*$",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
 
         # marketsAlpha often appends a terminal promo fragment like:
         # "__mt в max__ (https://max.ru/markettwits)"
@@ -264,13 +321,30 @@ class Forwarder:
             flags=re.IGNORECASE,
         )
 
-        # If a lead-in survives after promo removal, trim it as well.
         out = re.sub(
-            r"(?:[.]\s*)?For more details,\s*visit\s*$",
+            r"(?:\s*(?:For more (?:details|information),\s*visit\s+)?)?\[\s*$",
             "",
             out,
             flags=re.IGNORECASE,
         )
+
+        # Clean common leftover lead-in phrases after promo link removal.
+        out = re.sub(
+            r"\b(?:Check out|Additionally,\s*visit)\s+(?:for (?:additional|more) insights?)?\.?",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+
+        # If a lead-in survives after promo removal, trim it as well.
+        out = re.sub(
+            r"(?:[.]\s*)?For more (?:details|information),\s*visit\s*$",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"\s{2,}", " ", out)
+        out = re.sub(r"\s+([,.;:])", r"\1", out)
         out = re.sub(r"[ \t]+\n", "\n", out)
         out = re.sub(r"\n{3,}", "\n\n", out)
         return out.strip()
@@ -295,6 +369,14 @@ class Forwarder:
         )
         return out.strip()
 
+    @staticmethod
+    def _strip_any_trailing_handle(text: str) -> str:
+        out = (text or "").strip()
+        if not out:
+            return out
+        out = re.sub(r"\s+@[A-Za-z0-9_]{2,64}\b[.!,:;]?\s*$", "", out)
+        return out.strip()
+
     def _apply_telegram_source_rules(
         self,
         text: str,
@@ -307,12 +389,16 @@ class Forwarder:
         # Apply this globally across Telegram sources to reduce noisy alert prefixes
         # while preserving the rest of the message body.
         out = self._strip_leading_alert_emoji(out)
+        if profile.strip_leading_decor_emoji:
+            out = self._strip_leading_decor_emoji(out)
         if profile.strip_markettwits_max_promo:
             out = self._strip_markettwits_max_promo(out)
         if profile.strip_trailing_source_handle:
             out = self._strip_trailing_source_handle(
                 out, channel_username=channel_username
             )
+        if profile.strip_any_trailing_handle:
+            out = self._strip_any_trailing_handle(out)
         if profile.weekly_digest_spacing and re.search(r"(?i)\bThe Week Ahead:", out):
             out = self._prettify_infinityhedge_weekly_digest(
                 out, source_label=source_label
@@ -337,11 +423,14 @@ class Forwarder:
             url = (match.group(2) or "").strip()
             if not label or not url:
                 return match.group(0)
+            label_html = html.escape(label)
+            if profile.preserve_markdown_bold:
+                label_html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", label_html)
             token = f"__TF_LINK_{len(placeholders)}__"
             placeholders.append(
                 (
                     token,
-                    f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>',
+                    f'<a href="{html.escape(url, quote=True)}">{label_html}</a>',
                 )
             )
             return token
@@ -811,8 +900,10 @@ class Forwarder:
                 "weekly_digest_spacing": profile.weekly_digest_spacing,
                 "trailing_url_to_read_more": profile.trailing_url_to_read_more,
                 "strip_leading_alert_emoji": profile.strip_leading_alert_emoji,
+                "strip_leading_decor_emoji": profile.strip_leading_decor_emoji,
                 "strip_markettwits_max_promo": profile.strip_markettwits_max_promo,
                 "strip_trailing_source_handle": profile.strip_trailing_source_handle,
+                "strip_any_trailing_handle": profile.strip_any_trailing_handle,
             },
             "payload": {
                 "raw_text": raw_text,
