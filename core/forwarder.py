@@ -654,19 +654,22 @@ class Forwarder:
 
     async def _handle_message(self, message: Message):
         if getattr(message, "out", False):
-            # Prevent loops when forwarding into chats where this account also listens.
+            logger.info("Dropped outbound message chat=%s msg=%s (loop prevention)", getattr(message, "chat_id", "?"), getattr(message, "id", "?"))
             return
 
         chat_id = getattr(message, "chat_id", None) or getattr(
             message.peer_id, "channel_id", None
         )
         if not chat_id:
+            logger.warning("Dropped message with no chat_id msg=%s", getattr(message, "id", "?"))
             return
         if not self.telegram:
+            logger.warning("Dropped message chat=%s msg=%s (telegram client not set)", chat_id, getattr(message, "id", "?"))
             return
 
         routes = self._channel_webhook_map.get(chat_id, [])
         if not routes:
+            logger.info("Dropped message chat=%s msg=%s (no routes configured)", chat_id, message.id)
             return
         telegram_routes = [
             r
@@ -681,14 +684,14 @@ class Forwarder:
 
         text = getattr(message, "text", "") or getattr(message, "message", "") or ""
         if getattr(message, "media", None) and not text.strip():
-            logger.debug("Skipping media-only message chat=%s msg=%s", chat_id, message.id)
+            logger.info("Dropped media-only message chat=%s msg=%s (no text)", chat_id, message.id)
             return
 
         transformer = self._channel_transformer_map.get(chat_id, MessageTransformer())
         transform_result = transformer.transform(text)
 
         if not transform_result.should_forward:
-            logger.debug(f"Message blocked: {transform_result.blocked_by}")
+            logger.info("Dropped message chat=%s msg=%s (blocked by rule: %s)", chat_id, message.id, transform_result.blocked_by)
             return
 
         media_path: Optional[str] = None
