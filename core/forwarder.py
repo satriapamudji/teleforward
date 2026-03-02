@@ -39,6 +39,9 @@ class TelegramSourceFormatProfile:
     strip_markettwits_max_promo: bool = False
     strip_trailing_source_handle: bool = False
     strip_any_trailing_handle: bool = False
+    strip_self_channel_link: bool = False
+    trailing_link_to_footer: bool = False
+    strip_trailing_promo_link: bool = False
 
 
 DEFAULT_TELEGRAM_SOURCE_FORMAT_PROFILE = TelegramSourceFormatProfile()
@@ -79,10 +82,26 @@ TELEGRAM_SOURCE_FORMAT_PROFILES: dict[str, TelegramSourceFormatProfile] = {
     "unfolded": TelegramSourceFormatProfile(
         convert_markdown_links=True,
         preserve_markdown_bold=True,
+        trailing_link_to_footer=True,
     ),
     "shoalwire": TelegramSourceFormatProfile(
         convert_markdown_links=True,
         preserve_markdown_bold=True,
+    ),
+    "fearandgreedchart": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=True,
+        strip_self_channel_link=True,
+    ),
+    "wublockchainenglish": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=True,
+        trailing_link_to_footer=True,
+    ),
+    "zoomerfiednews": TelegramSourceFormatProfile(
+        convert_markdown_links=True,
+        preserve_markdown_bold=True,
+        strip_trailing_promo_link=True,
     ),
 }
 
@@ -330,7 +349,7 @@ class Forwarder:
 
         # Clean common leftover lead-in phrases after promo link removal.
         out = re.sub(
-            r"\b(?:Check out|Additionally,\s*visit)\s+(?:for (?:additional|more) insights?)?\.?",
+            r"(?:Check out|Additionally,?\s*visit)\s*(?:for (?:additional|more) insights?)?\.?\s*$",
             "",
             out,
             flags=re.IGNORECASE,
@@ -338,7 +357,7 @@ class Forwarder:
 
         # If a lead-in survives after promo removal, trim it as well.
         out = re.sub(
-            r"(?:[.]\s*)?For more (?:details|information),\s*visit\s*$",
+            r"(?:[.]\s*)?(?:For\s+)?(?:more|further)?\s*(?:details|information|updates|insights),?\s*visit\s*$",
             "",
             out,
             flags=re.IGNORECASE,
@@ -374,7 +393,7 @@ class Forwarder:
         out = (text or "").strip()
         if not out:
             return out
-        out = re.sub(r"\s+@[A-Za-z0-9_]{2,64}\b[.!,:;]?\s*$", "", out)
+        out = re.sub(r"[\s*]+@[A-Za-z0-9_]{2,64}\b[.!,:;]?[\s*]*$", "", out)
         return out.strip()
 
     def _apply_telegram_source_rules(
@@ -399,6 +418,19 @@ class Forwarder:
             )
         if profile.strip_any_trailing_handle:
             out = self._strip_any_trailing_handle(out)
+        if profile.strip_self_channel_link and channel_username:
+            out = re.sub(
+                rf"^\[.*?\]\(https?://t\.me/{re.escape(channel_username)}/?\)\s*$",
+                "",
+                out,
+                flags=re.DOTALL,
+            )
+        if profile.strip_trailing_promo_link:
+            out = re.sub(
+                r"\s*\U0001F517?\s*\[[^\]\n]+\]\(https?://[^\s)]+\)\s*$",
+                "",
+                out,
+            )
         if profile.weekly_digest_spacing and re.search(r"(?i)\bThe Week Ahead:", out):
             out = self._prettify_infinityhedge_weekly_digest(
                 out, source_label=source_label
@@ -426,6 +458,8 @@ class Forwarder:
             label_html = html.escape(label)
             if profile.preserve_markdown_bold:
                 label_html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", label_html)
+            else:
+                label_html = label_html.replace("**", "")
             token = f"__TF_LINK_{len(placeholders)}__"
             placeholders.append(
                 (
@@ -448,7 +482,9 @@ class Forwarder:
 
         escaped = html.escape(raw)
         if profile.preserve_markdown_bold:
+            escaped = re.sub(r"\*{4,}", "**", escaped)
             escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+        escaped = escaped.replace("**", "")
         for token, anchor in placeholders:
             escaped = escaped.replace(html.escape(token), anchor)
         return escaped
@@ -814,6 +850,17 @@ class Forwarder:
             channel_username=channel_username,
             profile=profile,
         )
+
+        # Extract trailing article link for footer placement before HTML conversion.
+        article_url: Optional[str] = None
+        if profile.trailing_link_to_footer and body:
+            m = re.search(
+                r"\s*\[[^\]\n]+\]\((https?://[^\s)]+)\)\s*$", body
+            )
+            if m:
+                article_url = m.group(1)
+                body = body[: m.start()].rstrip()
+
         if not body:
             body = "(no text)"
 
@@ -824,12 +871,18 @@ class Forwarder:
         )
         footer_html = None
         if source_label or sender_name or channel_name:
+            source_part = None
             if telegram_link and self.include_telegram_link:
-                footer_html = (
+                source_part = (
                     f'<a href="{html.escape(telegram_link, quote=True)}">[Source]</a>'
                 )
             else:
-                footer_html = "[Source]"
+                source_part = "[Source]"
+            if article_url:
+                link_part = f'<a href="{html.escape(article_url, quote=True)}">[Link]</a>'
+                footer_html = f"{link_part} | {source_part}"
+            else:
+                footer_html = source_part
 
         if footer_html:
             separator = "\n\n"
