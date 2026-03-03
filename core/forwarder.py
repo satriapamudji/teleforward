@@ -864,6 +864,9 @@ class Forwarder:
                 article_url = m.group(1)
                 body = body[: m.start()].rstrip()
 
+        if not body and profile.strip_self_channel_link:
+            return ""
+
         if not body:
             body = "(no text)"
 
