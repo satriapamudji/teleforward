@@ -70,6 +70,7 @@ TELEGRAM_SOURCE_FORMAT_PROFILES: dict[str, TelegramSourceFormatProfile] = {
         strip_leading_alert_emoji=True,
         strip_leading_decor_emoji=True,
         strip_markettwits_max_promo=True,
+        trailing_link_to_footer=True,
     ),
     "finwatch": TelegramSourceFormatProfile(
         convert_markdown_links=True,
@@ -362,7 +363,8 @@ class Forwarder:
             out,
             flags=re.IGNORECASE,
         )
-        out = re.sub(r"\s{2,}", " ", out)
+        # Keep newlines intact; only collapse repeated spaces/tabs.
+        out = re.sub(r"[ \t]{2,}", " ", out)
         out = re.sub(r"\s+([,.;:])", r"\1", out)
         out = re.sub(r"[ \t]+\n", "\n", out)
         out = re.sub(r"\n{3,}", "\n\n", out)
@@ -396,11 +398,50 @@ class Forwarder:
         out = re.sub(r"[\s*]+@[A-Za-z0-9_]{2,64}\b[.!,:;]?[\s*]*$", "", out)
         return out.strip()
 
+    @staticmethod
+    def _strip_legacy_source_tail(
+        text: str,
+        *,
+        source_label: Optional[str],
+        channel_name: Optional[str],
+        channel_username: Optional[str],
+    ) -> str:
+        out = (text or "").strip()
+        if not out:
+            return out
+
+        candidates = {
+            (source_label or "").strip(),
+            (channel_name or "").strip(),
+            ((channel_username or "").strip().lstrip("@")),
+        }
+        candidates = {c for c in candidates if c}
+        if not candidates:
+            return out
+
+        for cand in sorted(candidates, key=len, reverse=True):
+            esc = re.escape(cand)
+            out = re.sub(rf"(?:\n|^)\s*[-–—]\s*{esc}\s*$", "", out, flags=re.IGNORECASE)
+            out = re.sub(
+                rf"(?:\n|^)\s*(?:source|src)\s*[:\-]\s*{esc}\s*$",
+                "",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(
+                rf"(?:\n|^)\s*\[\s*{esc}\s*\]\s*$",
+                "",
+                out,
+                flags=re.IGNORECASE,
+            )
+        return out.strip()
+
     def _apply_telegram_source_rules(
         self,
         text: str,
         *,
         source_label: Optional[str],
+        channel_name: Optional[str],
         channel_username: Optional[str],
         profile: TelegramSourceFormatProfile,
     ) -> str:
@@ -418,6 +459,12 @@ class Forwarder:
             )
         if profile.strip_any_trailing_handle:
             out = self._strip_any_trailing_handle(out)
+        out = self._strip_legacy_source_tail(
+            out,
+            source_label=source_label,
+            channel_name=channel_name,
+            channel_username=channel_username,
+        )
         if profile.strip_self_channel_link and channel_username:
             out = re.sub(
                 rf"^\[.*?\]\(https?://t\.me/{re.escape(channel_username)}/?\)\s*$",
@@ -850,6 +897,7 @@ class Forwarder:
         body = self._apply_telegram_source_rules(
             body,
             source_label=source_label,
+            channel_name=channel_name,
             channel_username=channel_username,
             profile=profile,
         )
@@ -863,6 +911,33 @@ class Forwarder:
             if m:
                 article_url = m.group(1)
                 body = body[: m.start()].rstrip()
+            else:
+                # Fallback for non-markdown trailing variants like:
+                # "- link (https://...)" or "— link (https://...)"
+                m2 = re.search(
+                    r"\s*(?:[—-]\s*)?link\s*\((https?://[^\s)]+)\)\s*$",
+                    body,
+                    flags=re.IGNORECASE,
+                )
+                if m2:
+                    article_url = m2.group(1)
+                    body = body[: m2.start()].rstrip()
+            if article_url:
+                # Remove dangling lead-ins when trailing links are moved to footer.
+                body = re.sub(
+                    r"(?:[.]\s*)?(?:For\s+)?(?:more|further)?\s*"
+                    r"(?:details|information|updates|insights),?\s*visit\s*$",
+                    "",
+                    body,
+                    flags=re.IGNORECASE,
+                ).rstrip()
+                body = re.sub(
+                    r"(?:[.]\s*)?(?:Check out|Additionally,?\s*visit)\s*"
+                    r"(?:for (?:additional|more) insights?)?\.?\s*$",
+                    "",
+                    body,
+                    flags=re.IGNORECASE,
+                ).rstrip()
 
         if not body and profile.strip_self_channel_link:
             return ""
