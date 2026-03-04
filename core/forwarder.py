@@ -284,6 +284,39 @@ class Forwarder:
         return out.strip()
 
     @staticmethod
+    def _strip_trailing_link_leadin_noise(text: str) -> str:
+        out = (text or "").rstrip()
+        if not out:
+            return out
+        original = out
+        patterns = (
+            r"(?:[.]\s*)?(?:For\s+)?(?:more|further)?\s*"
+            r"(?:details|information|updates|insights),?\s*visit"
+            r"(?:\s+(?:the|this|that))?"
+            r"(?:\s+(?:official|full|latest|original))?"
+            r"(?:\s+(?:release|article|report|statement|post|link))?\s*$",
+            r"(?:[.]\s*)?(?:Check out|Additionally,?\s*visit)\s*"
+            r"(?:for (?:additional|more) insights?)?\.?\s*$",
+            r"(?:[.]\s*)?(?:For\s+)?(?:more|further)?\s*"
+            r"(?:details|information|updates|insights),?\s*"
+            r"(?:you can\s+)?read\s+(?:the\s+)?(?:full\s+)?"
+            r"(?:article|report|statement|post|link)\s*$",
+            r"(?:[.]\s*)?(?:Additionally,?\s*)?(?:additional\s+)?"
+            r"(?:insights?|updates?)\s+can\s+be\s+found\s+at\s*$",
+            r"(?:[.]\s*)?and\s+check\s*$",
+        )
+        for pattern in patterns:
+            out = re.sub(pattern, "", out, flags=re.IGNORECASE).rstrip()
+        if (
+            out
+            and out != original
+            and re.search(r"[A-Za-z0-9\"']$", out)
+            and not re.search(r"[.!?:;]$", out)
+        ):
+            out = f"{out}."
+        return out.strip()
+
+    @staticmethod
     def _strip_markettwits_max_promo(text: str) -> str:
         out = (text or "").strip()
         if not out:
@@ -348,21 +381,8 @@ class Forwarder:
             flags=re.IGNORECASE,
         )
 
-        # Clean common leftover lead-in phrases after promo link removal.
-        out = re.sub(
-            r"(?:Check out|Additionally,?\s*visit)\s*(?:for (?:additional|more) insights?)?\.?\s*$",
-            "",
-            out,
-            flags=re.IGNORECASE,
-        )
-
-        # If a lead-in survives after promo removal, trim it as well.
-        out = re.sub(
-            r"(?:[.]\s*)?(?:For\s+)?(?:more|further)?\s*(?:details|information|updates|insights),?\s*visit\s*$",
-            "",
-            out,
-            flags=re.IGNORECASE,
-        )
+        # Promo links can leave dangling lead-ins behind (e.g. "...and check").
+        out = Forwarder._strip_trailing_link_leadin_noise(out)
         # Keep newlines intact; only collapse repeated spaces/tabs.
         out = re.sub(r"[ \t]{2,}", " ", out)
         out = re.sub(r"\s+([,.;:])", r"\1", out)
@@ -901,6 +921,8 @@ class Forwarder:
             channel_username=channel_username,
             profile=profile,
         )
+        if profile.strip_markettwits_max_promo or profile.trailing_link_to_footer:
+            body = self._strip_trailing_link_leadin_noise(body)
 
         # Extract trailing article link for footer placement before HTML conversion.
         article_url: Optional[str] = None
@@ -924,20 +946,7 @@ class Forwarder:
                     body = body[: m2.start()].rstrip()
             if article_url:
                 # Remove dangling lead-ins when trailing links are moved to footer.
-                body = re.sub(
-                    r"(?:[.]\s*)?(?:For\s+)?(?:more|further)?\s*"
-                    r"(?:details|information|updates|insights),?\s*visit\s*$",
-                    "",
-                    body,
-                    flags=re.IGNORECASE,
-                ).rstrip()
-                body = re.sub(
-                    r"(?:[.]\s*)?(?:Check out|Additionally,?\s*visit)\s*"
-                    r"(?:for (?:additional|more) insights?)?\.?\s*$",
-                    "",
-                    body,
-                    flags=re.IGNORECASE,
-                ).rstrip()
+                body = self._strip_trailing_link_leadin_noise(body)
 
         if not body and profile.strip_self_channel_link:
             return ""
