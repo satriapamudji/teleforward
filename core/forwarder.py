@@ -306,6 +306,7 @@ class Forwarder:
             r"(?:[.]\s*)?(?:and\s+)?(?:Additionally,?\s*)?"
             r"follow\s+updates?\s+(?:on|at)\s*$",
             r"(?:[.]\s*)?(?:and\s+)?follow\s+for\s+updates\s*$",
+            r"(?:[.]\s*)?stay\s+updated(?:\s+with\s+the\s+latest\s+market\s+news)?\s+on\s*$",
             r"(?:[.]\s*)?and\s+check\s*$",
         )
         for pattern in patterns:
