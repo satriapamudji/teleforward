@@ -320,6 +320,15 @@ class Forwarder:
         return out.strip()
 
     @staticmethod
+    def _is_placeholder_media_caption(text: str) -> bool:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return False
+        # Some channels send a single dot/ellipsis caption to force media forwarding.
+        # Treat these as empty captions so we don't forward meaningless "." text.
+        return bool(re.fullmatch(r"[.\u2026]{1,6}", cleaned))
+
+    @staticmethod
     def _strip_markettwits_max_promo(text: str) -> str:
         out = (text or "").strip()
         if not out:
@@ -753,7 +762,18 @@ class Forwarder:
         ]
 
         text = getattr(message, "text", "") or getattr(message, "message", "") or ""
-        if getattr(message, "media", None) and not text.strip():
+        placeholder_media_caption = bool(
+            getattr(message, "media", None)
+            and self._is_placeholder_media_caption(text)
+        )
+        if placeholder_media_caption:
+            text = ""
+
+        if (
+            getattr(message, "media", None)
+            and not text.strip()
+            and not placeholder_media_caption
+        ):
             logger.info("Dropped media-only message chat=%s msg=%s (no text)", chat_id, message.id)
             return
 
@@ -809,6 +829,7 @@ class Forwarder:
                 text=transformed,
                 telegram_link=telegram_link,
                 channel_username=channel_username,
+                has_media=media_path is not None,
             )
 
             success, error = await self.telegram_sender.send(
@@ -910,6 +931,7 @@ class Forwarder:
         text: str,
         telegram_link: Optional[str],
         channel_username: Optional[str] = None,
+        has_media: bool = False,
     ) -> str:
         source_label, body = self._extract_leading_source_label(text)
         profile = self._resolve_telegram_source_format_profile(
@@ -955,7 +977,7 @@ class Forwarder:
             return ""
 
         if not body:
-            body = "(no text)"
+            body = "" if has_media else "(no text)"
 
         body_html = self._telegram_body_to_html(
             body,
@@ -978,6 +1000,8 @@ class Forwarder:
                 footer_html = source_part
 
         if footer_html:
+            if not body_html:
+                return footer_html[:4096]
             separator = "\n\n"
             max_len = 4096
             budget = max_len - len(separator) - len(footer_html)
