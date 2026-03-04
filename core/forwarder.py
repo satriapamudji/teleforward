@@ -303,6 +303,9 @@ class Forwarder:
             r"(?:article|report|statement|post|link)\s*$",
             r"(?:[.]\s*)?(?:Additionally,?\s*)?(?:additional\s+)?"
             r"(?:insights?|updates?)\s+can\s+be\s+found\s+at\s*$",
+            r"(?:[.]\s*)?(?:and\s+)?(?:Additionally,?\s*)?"
+            r"follow\s+updates?\s+(?:on|at)\s*$",
+            r"(?:[.]\s*)?(?:and\s+)?follow\s+for\s+updates\s*$",
             r"(?:[.]\s*)?and\s+check\s*$",
         )
         for pattern in patterns:
