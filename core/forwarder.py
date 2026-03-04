@@ -295,7 +295,7 @@ class Forwarder:
             r"(?:\s+(?:the|this|that))?"
             r"(?:\s+(?:official|full|latest|original))?"
             r"(?:\s+(?:release|article|report|statement|post|link))?\s*$",
-            r"(?:[.]\s*)?(?:Check out|Additionally,?\s*visit)\s*"
+            r"(?:[.]\s*)?(?:and\s+)?(?:Check out|Additionally,?\s*visit)\s*"
             r"(?:for (?:additional|more) insights?)?\.?\s*$",
             r"(?:[.]\s*)?(?:For\s+)?(?:more|further)?\s*"
             r"(?:details|information|updates|insights),?\s*"
